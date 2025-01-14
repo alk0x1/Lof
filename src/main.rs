@@ -1,44 +1,98 @@
 pub mod frontend;
-pub mod examples;
-pub mod constraint_gen;
-
-use examples::{multiply_example, add_example, compare_example};
+use frontend::lexer::Lexer;
 use frontend::parser::Parser;
-use constraint_gen::r1cs::R1CS;
 
-fn parse_and_print(name: &str, input: &str) {
-  println!("\nParsing {}:", name);
-  println!("Input:\n{}", input);
-  
-  let mut parser = Parser::new(input);
-  match parser.parse_theorem() {
+pub fn visualize_ast(input: &str) {
+  println!("Input Program:");
+  println!("{}\n", input);
+
+  println!("Tokens:");
+  let lexer = Lexer::new(input);
+  let tokens: Vec<_> = lexer.collect();
+  for token in &tokens {
+    println!("{:?}", token);
+  }
+  println!();
+
+  println!("AST:");
+  let mut parser = Parser::new(tokens.into_iter());
+  match parser.parse_program() {
     Ok(ast) => {
-      println!("AST:");
-      println!("{}", ast.print_tree());
-      
-      println!("\nGenerating R1CS:");
-      match R1CS::from_ast(&ast) {
-        Ok(r1cs) => {
-          println!("Variables: {}", r1cs.num_vars);
-          println!("Inputs: {}", r1cs.num_inputs);
-          println!("Auxiliary: {}", r1cs.num_aux);
-          println!("\nConstraints:");
-          for (i, constraint) in r1cs.constraints.iter().enumerate() {
-            println!("Constraint {}:", i);
-            println!("  A: {:?}", constraint.a);
-            println!("  B: {:?}", constraint.b);
-            println!("  C: {:?}", constraint.c);
-          }
-        },
-        Err(e) => println!("R1CS generation error: {}", e),
+      for node in ast {
+        println!("{}", node.print_tree_helper("", ""));
       }
-    },
-    Err(e) => println!("Error: {}", e),
+    }
+    Err(e) => println!("Parse error: {:?}", e),
   }
 }
-
 fn main() {
-  // parse_and_print("Multiplication Example", multiply_example());
-  parse_and_print("Addition Example", add_example());
-  //parse_and_print("Comparison Example", compare_example());
+  // Example 1: Simple Proof
+  let input1 = r#"
+    proof RangeCheck {
+      input value: Field<0..255>;
+      witness bits: Bits<8>;
+      assert value === decompose(bits);
+    }
+  "#;
+  
+  println!("=== Example 1: Simple Proof ===");
+  visualize_ast(input1);
+
+  // Example 2: Pattern Matching
+  let input2 = r#"
+    proof TreeSum {
+      input tree: Tree;
+      output sum: Field;
+
+      match tree {
+        Leaf(v) => {
+          sum === v
+        },
+        Node(v, left, right) => {
+          let left_sum = TreeSum(left);
+          let right_sum = TreeSum(right);
+          sum === v + left_sum + right_sum
+        }
+      }
+    }
+  "#;
+  
+  println!("\n=== Example 2: Pattern Matching ===");
+  visualize_ast(input2);
+
+  // Example 3: Component
+  let input3 = r#"
+    component HashFunction {
+      input preimage: Field;
+      output hash: Field;
+
+      let t1 = preimage * preimage * preimage;
+      let t2 = t1 + 7;
+      hash === t2 * t2;
+    }
+  "#;
+  
+  println!("\n=== Example 3: Component ===");
+  visualize_ast(input3);
+
+  // Example 5: Recursive Proof
+  let input5 = r#"
+    proof ListSum {
+      input list: List;
+      output sum: Field;
+
+      match list {
+        Nil => {
+          sum === 0
+        },
+        Cons(head, tail) => {
+          let tail_sum = ListSum(tail);
+          sum === head + tail_sum
+        }
+      }
+    }
+  "#;
+
+  println!("\n=== Example 5: Recursive Proof ===");
+  visualize_ast(input5);
 }
