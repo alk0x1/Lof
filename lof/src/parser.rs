@@ -1,6 +1,7 @@
-use crate::frontend::lexer::{Token, Keyword, Symbol};
-use crate::frontend::ast::{Expression, Type, Signal, Visibility, Pattern, Constraint, Operator, GenericParam, MatchPattern};
+use crate::lexer::{Token, Keyword, Symbol};
+use crate::ast::{Expression, Type, Signal, Visibility, Pattern, Constraint, Operator, GenericParam, MatchPattern};
 use std::iter::Peekable;
+use std::fmt;
 
 pub struct Parser<T: Iterator<Item = Token>> {
   tokens: Peekable<T>,
@@ -508,5 +509,16 @@ impl<T: Iterator<Item = Token>> Parser<T> {
         Some(token) => Err(ParseError::UnexpectedToken(token)),
         None => Err(ParseError::UnexpectedEOF),
       }
+    }
+}
+
+impl fmt::Display for ParseError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ParseError::UnexpectedToken(token) => write!(f, "Unexpected token: {:?}", token),
+            ParseError::UnexpectedEOF => write!(f, "Unexpected end of file"),
+            ParseError::InvalidType => write!(f, "Invalid type"),
+            ParseError::InvalidExpression => write!(f, "Invalid expression"),
+        }
     }
 }

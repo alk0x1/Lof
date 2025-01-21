@@ -1,5 +1,6 @@
-[package]
-name = "Lof"
-version = "0.1.0"
-
-[dependencies]
+[workspace]
+members = [
+    "lof",
+    "cli"
+]
+resolver = "2"
