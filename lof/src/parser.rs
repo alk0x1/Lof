@@ -270,15 +270,15 @@ impl<T: Iterator<Item = Token>> Parser<T> {
   }
 
   fn parse_binary_expression(&mut self) -> ParseResult<Expression> {
-    // Parse the initial expression
     let mut expr_stack = vec![self.parse_primary_expression()?];
     let mut op_stack = Vec::new();
 
     while let Some(token) = self.peek() {
       let (op, precedence) = match token {
-        Token::Symbol(Symbol::TripleEqual) => (Operator::Assert, 1), // Lowest precedence
+        Token::Symbol(Symbol::TripleEqual) => (Operator::Assert, 1),
         Token::Symbol(Symbol::Plus) => (Operator::Add, 2),
         Token::Symbol(Symbol::Star) => (Operator::Mul, 3),
+        Token::Symbol(Symbol::Minus) => (Operator::Sub, 2),
         _ => break,
       };
 
@@ -314,13 +314,13 @@ impl<T: Iterator<Item = Token>> Parser<T> {
 
     // Process remaining operators
     while let Some(op) = op_stack.pop() {
-        let right_expr = expr_stack.pop().unwrap();
-        let left_expr = expr_stack.pop().unwrap();
-        expr_stack.push(Expression::BinaryOp {
-            left: Box::new(left_expr),
-            op,
-            right: Box::new(right_expr),
-        });
+      let right_expr = expr_stack.pop().unwrap();
+      let left_expr = expr_stack.pop().unwrap();
+      expr_stack.push(Expression::BinaryOp {
+        left: Box::new(left_expr),
+        op,
+        right: Box::new(right_expr),
+      });
     }
 
     Ok(expr_stack.pop().unwrap())
@@ -328,41 +328,41 @@ impl<T: Iterator<Item = Token>> Parser<T> {
 
   fn parse_primary_expression(&mut self) -> ParseResult<Expression> {
     match self.tokens.next() {
-          Some(Token::Number(n)) => Ok(Expression::Number(n)),
-          Some(Token::Identifier(name)) => {
-              if let Some(Token::Symbol(Symbol::LParen)) = self.peek() {
-                  self.tokens.next();
-                  let mut args = Vec::new();
-                  
-                  while let Some(token) = self.peek() {
-                      if token == &Token::Symbol(Symbol::RParen) {
-                          self.tokens.next();
-                          break;
-                      }
-                      
-                      args.push(self.parse_expression()?);
-                      
-                      match self.peek() {
-                          Some(Token::Symbol(Symbol::Comma)) => {
-                              self.tokens.next();
-                          }
-                          Some(Token::Symbol(Symbol::RParen)) => continue,
-                          _ => return Err(ParseError::UnexpectedToken(self.tokens.next().unwrap())),
-                      }
-                  }
-                  
-                  Ok(Expression::FunctionCall {
-                      function: name,
-                      arguments: args,
-                  })
-              } else {
-                  Ok(Expression::Variable(name))
+      Some(Token::Number(n)) => Ok(Expression::Number(n)),
+      Some(Token::Identifier(name)) => {
+        if let Some(Token::Symbol(Symbol::LParen)) = self.peek() {
+          self.tokens.next();
+          let mut args = Vec::new();
+          
+          while let Some(token) = self.peek() {
+            if token == &Token::Symbol(Symbol::RParen) {
+              self.tokens.next();
+              break;
+            }
+            
+            args.push(self.parse_expression()?);
+            
+            match self.peek() {
+              Some(Token::Symbol(Symbol::Comma)) => {
+                self.tokens.next();
               }
-          },
-          Some(Token::Keyword(Keyword::Match)) => self.parse_match_expression(),
-          Some(token) => Err(ParseError::UnexpectedToken(token)),
-          None => Err(ParseError::UnexpectedEOF),
-      }
+              Some(Token::Symbol(Symbol::RParen)) => continue,
+              _ => return Err(ParseError::UnexpectedToken(self.tokens.next().unwrap())),
+            }
+          }
+          
+          Ok(Expression::FunctionCall {
+            function: name,
+            arguments: args,
+          })
+        } else {
+          Ok(Expression::Variable(name))
+        }
+      },
+      Some(Token::Keyword(Keyword::Match)) => self.parse_match_expression(),
+      Some(token) => Err(ParseError::UnexpectedToken(token)),
+      None => Err(ParseError::UnexpectedEOF),
+    }
   }
 
   fn parse_match_expression(&mut self) -> ParseResult<Expression> {
@@ -398,31 +398,31 @@ impl<T: Iterator<Item = Token>> Parser<T> {
   fn parse_pattern(&mut self) -> ParseResult<Pattern> {
     match self.tokens.next() {
       Some(Token::Identifier(name)) => {
-          if let Some(Token::Symbol(Symbol::LParen)) = self.peek() {
+        if let Some(Token::Symbol(Symbol::LParen)) = self.peek() {
+          self.tokens.next();
+          let mut subpatterns = Vec::new();
+          
+          while let Some(token) = self.peek() {
+            if token == &Token::Symbol(Symbol::RParen) {
               self.tokens.next();
-              let mut subpatterns = Vec::new();
-              
-              while let Some(token) = self.peek() {
-                  if token == &Token::Symbol(Symbol::RParen) {
-                      self.tokens.next();
-                      break;
-                  }
-                  
-                  subpatterns.push(self.parse_pattern()?);
-                  
-                  match self.peek() {
-                      Some(Token::Symbol(Symbol::Comma)) => {
-                          self.tokens.next();
-                      }
-                      Some(Token::Symbol(Symbol::RParen)) => continue,
-                      _ => return Err(ParseError::UnexpectedToken(self.tokens.next().unwrap())),
-                  }
+              break;
+            }
+            
+            subpatterns.push(self.parse_pattern()?);
+            
+            match self.peek() {
+              Some(Token::Symbol(Symbol::Comma)) => {
+                self.tokens.next();
               }
-              
-              Ok(Pattern::Constructor(name, subpatterns))
-          } else {
-              Ok(Pattern::Variable(name))
+              Some(Token::Symbol(Symbol::RParen)) => continue,
+              _ => return Err(ParseError::UnexpectedToken(self.tokens.next().unwrap())),
+            }
           }
+          
+          Ok(Pattern::Constructor(name, subpatterns))
+        } else {
+          Ok(Pattern::Variable(name))
+        }
       }
       Some(Token::Symbol(Symbol::Underscore)) => Ok(Pattern::Wildcard),
       Some(token) => Err(ParseError::UnexpectedToken(token)),
@@ -463,9 +463,9 @@ impl<T: Iterator<Item = Token>> Parser<T> {
     self.expect(Token::Keyword(Keyword::Let))?;
     
     let name = match self.tokens.next() {
-        Some(Token::Identifier(name)) => name,
-        Some(token) => return Err(ParseError::UnexpectedToken(token)),
-        None => return Err(ParseError::UnexpectedEOF),
+      Some(Token::Identifier(name)) => name,
+      Some(token) => return Err(ParseError::UnexpectedToken(token)),
+      None => return Err(ParseError::UnexpectedEOF),
     };
 
     self.expect(Token::Symbol(Symbol::Equals))?;
@@ -486,39 +486,39 @@ impl<T: Iterator<Item = Token>> Parser<T> {
   }
 
   pub fn parse_constraint(&mut self) -> ParseResult<Constraint> {
-      match self.tokens.next() {
-        Some(Token::Keyword(Keyword::Assert)) => {
-            let expr = Box::new(self.parse_expression()?);
-            self.expect(Token::Symbol(Symbol::Semi))?;
-            Ok(Constraint::Assert(expr))
-        }
-        Some(Token::Keyword(Keyword::Verify)) => {
-            let expr = Box::new(self.parse_expression()?);
-            self.expect(Token::Symbol(Symbol::Semi))?;
-            Ok(Constraint::Verify(expr))
-        }
-        Some(Token::Keyword(Keyword::Match)) => {
-            let expr = self.parse_match_expression()?;
-            Ok(Constraint::Match(Box::new(expr)))
-        }
-        Some(Token::Keyword(Keyword::Let)) => {
-            // Add support for let bindings in constraints
-            let expr = self.parse_let_binding()?;
-            Ok(Constraint::Let(Box::new(expr)))
-        }
-        Some(token) => Err(ParseError::UnexpectedToken(token)),
-        None => Err(ParseError::UnexpectedEOF),
+    match self.tokens.next() {
+      Some(Token::Keyword(Keyword::Assert)) => {
+        let expr = Box::new(self.parse_expression()?);
+        self.expect(Token::Symbol(Symbol::Semi))?;
+        Ok(Constraint::Assert(expr))
       }
+      Some(Token::Keyword(Keyword::Verify)) => {
+        let expr = Box::new(self.parse_expression()?);
+        self.expect(Token::Symbol(Symbol::Semi))?;
+        Ok(Constraint::Verify(expr))
+      }
+      Some(Token::Keyword(Keyword::Match)) => {
+        let expr = self.parse_match_expression()?;
+        Ok(Constraint::Match(Box::new(expr)))
+      }
+      Some(Token::Keyword(Keyword::Let)) => {
+        // Add support for let bindings in constraints
+        let expr = self.parse_let_binding()?;
+        Ok(Constraint::Let(Box::new(expr)))
+      }
+      Some(token) => Err(ParseError::UnexpectedToken(token)),
+      None => Err(ParseError::UnexpectedEOF),
     }
+  }
 }
 
 impl fmt::Display for ParseError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            ParseError::UnexpectedToken(token) => write!(f, "Unexpected token: {:?}", token),
-            ParseError::UnexpectedEOF => write!(f, "Unexpected end of file"),
-            ParseError::InvalidType => write!(f, "Invalid type"),
-            ParseError::InvalidExpression => write!(f, "Invalid expression"),
-        }
+  fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    match self {
+      ParseError::UnexpectedToken(token) => write!(f, "Unexpected token: {:?}", token),
+      ParseError::UnexpectedEOF => write!(f, "Unexpected end of file"),
+      ParseError::InvalidType => write!(f, "Invalid type"),
+      ParseError::InvalidExpression => write!(f, "Invalid expression"),
     }
+  }
 }

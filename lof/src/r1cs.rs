@@ -1,4 +1,4 @@
-use std::{collections::HashMap, io::Write, path::PathBuf};
+use std::{collections::HashMap, io::{Read, Seek, Write}, path::PathBuf};
 use crate::{ast::{self, Constraint, Expression, Operator}, logger::CompilerLogger};
 use std::fmt;
 
@@ -30,7 +30,7 @@ pub struct R1CSGenerator<'a> {
   pub symbol_map: HashMap<String, usize>,
   pub pub_inputs: Vec<String>,
   pub witnesses: Vec<String>,
-  logger: &'a CompilerLogger,
+  logger: Option<&'a CompilerLogger>,
 }
 
 impl<'a> R1CSGenerator<'a> {
@@ -41,74 +41,75 @@ impl<'a> R1CSGenerator<'a> {
       symbol_map: HashMap::new(),
       pub_inputs: Vec::new(),
       witnesses: Vec::new(),
-      logger,
+      logger: Some(logger),
     }
   }
-    pub fn write_r1cs_file(&self, source_path: &PathBuf) -> std::io::Result<u64> {
   
-    let parent_dir = source_path.parent()
-      .ok_or_else(|| std::io::Error::new(
-        std::io::ErrorKind::Other, 
-        "Could not determine parent directory"
-      ))?;
-
-    let file_stem = source_path.file_stem()
-      .ok_or_else(|| std::io::Error::new(
-        std::io::ErrorKind::Other,
-        "Could not get file name"
-      ))?;
-    
-    let mut r1cs_path = parent_dir.to_path_buf();
-    r1cs_path.push(file_stem);
+  pub fn new_without_logger() -> Self {
+    Self {
+      constraints: Vec::new(),
+      temp_var_counter: 0,
+      symbol_map: HashMap::new(),
+      pub_inputs: Vec::new(),
+      witnesses: Vec::new(),
+      logger: None,
+    }
+  }
+  
+  pub fn write_r1cs_file(&self, source_path: &PathBuf) -> std::io::Result<u64> {
+    let mut r1cs_path = source_path.parent()
+        .ok_or_else(|| std::io::Error::new(
+            std::io::ErrorKind::Other, 
+            "Could not determine parent directory"
+        ))?.to_path_buf();
+    r1cs_path.push(source_path.file_stem().unwrap());
     r1cs_path.set_extension("r1cs");
     
-    self.logger.writing_r1cs(&r1cs_path);
+    if let Some(logger) = self.logger {
+      logger.writing_r1cs(&r1cs_path);
+    }
 
-    let file = match std::fs::File::create(&r1cs_path) {
-      Ok(f) => f,
-      Err(e) => {
-        self.logger.r1cs_write_failed(&e);
-        return Err(e);
-      }
-    };
-    
+    let file = std::fs::File::create(&r1cs_path)?;
     let mut writer = std::io::BufWriter::new(file);
 
-    writer.write_all(b"r1cs")?;
-    
-    self.logger.r1cs_metadata(
-      self.pub_inputs.len(),
-      self.witnesses.len(),
-      self.constraints.len()
-    );
+    writer.write_all(b"lof-r1cs")?;
+    writer.write_all(&1u32.to_le_bytes())?;
 
     writer.write_all(&(self.pub_inputs.len() as u32).to_le_bytes())?;
     writer.write_all(&(self.witnesses.len() as u32).to_le_bytes())?;
     writer.write_all(&(self.constraints.len() as u32).to_le_bytes())?;
 
-    let mut constraints_written = 0;
+    for input in &self.pub_inputs {
+      writer.write_all(&(input.len() as u32).to_le_bytes())?;
+      writer.write_all(input.as_bytes())?;
+    }
+
+    for witness in &self.witnesses {
+      writer.write_all(&(witness.len() as u32).to_le_bytes())?;
+      writer.write_all(witness.as_bytes())?;
+    }
+
     for constraint in &self.constraints {
       self.write_linear_combination(&mut writer, &constraint.a)?;
       self.write_linear_combination(&mut writer, &constraint.b)?;
       self.write_linear_combination(&mut writer, &constraint.c)?;
-      constraints_written += 1;
     }
 
     let metadata = std::fs::metadata(&r1cs_path)?;
-    self.logger.r1cs_write_success(&r1cs_path, metadata.len(), constraints_written);
+    if let Some(logger) = self.logger {
+      logger.r1cs_write_success(&r1cs_path, metadata.len(), self.constraints.len());
+    }
 
     Ok(metadata.len())
-}
+  }
 
-
-  fn write_linear_combination<W: Write>(&self, writer: &mut W, lc: &LinearCombination) -> std::io::Result<()> {
+  fn write_linear_combination<W: Write + Seek>(&self, writer: &mut W, lc: &LinearCombination) -> std::io::Result<()> {
     writer.write_all(&(lc.terms.len() as u32).to_le_bytes())?;
     
-    for (_, coeff) in &lc.terms {
-      writer.write_all(&(coeff).to_le_bytes())?;
-      // TODO: Write variable index
-      // For now, let's just write a placeholder
-      writer.write_all(&0u32.to_le_bytes())?;
+    for (var, coeff) in &lc.terms {
+        let idx = self.get_variable_index(var);
+        writer.write_all(&(idx as u32).to_le_bytes())?;
+        writer.write_all(&(coeff).to_le_bytes())?;
     }
     
     Ok(())
@@ -156,25 +157,21 @@ impl<'a> R1CSGenerator<'a> {
   }
 
   fn convert_assertion(&mut self, expr: &Expression) -> Result<(), R1CSError> {
-    match expr {
-      Expression::BinaryOp { left, op: Operator::Assert, right } => {
-        // Convert a === b into a - b = 0
-        let a = self.convert_to_linear_combination(left)?;
-        let b = self.convert_to_linear_combination(right)?;
-        
-        // Create a - b = 0 constraint
-        let neg_b = b.negate();
-        
-        self.constraints.push(R1CSConstraint {
-          a,
-          b: LinearCombination { terms: vec![("ONE".to_string(), 1)] },
-          c: neg_b
-        });
-        
-        Ok(())
+      match expr {
+          Expression::BinaryOp { left, op: Operator::Assert, right } => {
+              let a = self.convert_to_linear_combination(left)?;
+              let b = self.convert_to_linear_combination(right)?;
+
+              self.constraints.push(R1CSConstraint {
+                  a,
+                  b: LinearCombination { terms: vec![("ONE".to_string(), 1)] },
+                  c: b
+              });
+              
+              Ok(())
+          }
+          _ => Err(R1CSError::InvalidArgument("Expected assertion".to_string()))
       }
-      _ => Err(R1CSError::InvalidArgument("Expected assertion".to_string()))
-    }
   }
 
   fn convert_to_linear_combination(&mut self, expr: &Expression) -> Result<LinearCombination, R1CSError> {
@@ -238,14 +235,11 @@ impl<'a> R1CSGenerator<'a> {
       _ => return Err(R1CSError::InvalidArgument("decompose expects a variable".to_string()))
     };
 
-    // Create constraints for bit decomposition
-    // Each bit needs to be 0 or 1: bi * (1 - bi) = 0
     let mut sum_terms = Vec::new();
     for i in 0..8 {
       let bit = format!("{}_bit_{}", bits, i);
       self.witnesses.push(bit.clone());
       
-      // bi * (1 - bi) = 0 constraint
       self.constraints.push(R1CSConstraint {
         a: LinearCombination { terms: vec![(bit.clone(), 1)] },
         b: LinearCombination { 
@@ -254,7 +248,6 @@ impl<'a> R1CSGenerator<'a> {
         c: LinearCombination { terms: vec![] }
       });
 
-      // Add to sum with power of 2
       sum_terms.push((bit, 1 << i));
     }
 
@@ -360,3 +353,159 @@ impl fmt::Display for R1CSError {
     }
   }
 }
+
+pub fn read_r1cs_file(path: &PathBuf) -> std::io::Result<R1CSGenerator> {
+  use std::io::Read;
+  
+  let file = std::fs::File::open(path)?;
+  let mut reader = std::io::BufReader::new(file);
+  
+  let mut magic = [0u8; 8];
+  reader.read_exact(&mut magic)?;
+  if &magic != b"lof-r1cs" {
+    return Err(std::io::Error::new(
+      std::io::ErrorKind::InvalidData,
+      "Invalid magic bytes - not a lof-r1cs file"
+    ));
+  }
+  
+  let mut version = [0u8; 4];
+  reader.read_exact(&mut version)?;
+  if u32::from_le_bytes(version) != 1 {
+    return Err(std::io::Error::new(
+      std::io::ErrorKind::InvalidData,
+      "Unsupported r1cs version"
+    ));
+  }
+
+  let mut buf = [0u8; 4];
+  reader.read_exact(&mut buf)?;
+  let pub_inputs_count = u32::from_le_bytes(buf);
+  
+  reader.read_exact(&mut buf)?;
+  let witnesses_count = u32::from_le_bytes(buf);
+  
+  reader.read_exact(&mut buf)?;
+  let constraints_count = u32::from_le_bytes(buf);
+
+  let mut pub_inputs = Vec::new();
+  for _ in 0..pub_inputs_count {
+    reader.read_exact(&mut buf)?;
+    let len = u32::from_le_bytes(buf) as usize;
+    let mut name = vec![0u8; len];
+    reader.read_exact(&mut name)?;
+    pub_inputs.push(String::from_utf8(name).map_err(|e| {
+        std::io::Error::new(std::io::ErrorKind::InvalidData, e)
+    })?);
+  }
+
+  let mut witnesses = Vec::new();
+  for _ in 0..witnesses_count {
+    reader.read_exact(&mut buf)?;
+    let len = u32::from_le_bytes(buf) as usize;
+    let mut name = vec![0u8; len];
+    reader.read_exact(&mut name)?;
+    witnesses.push(String::from_utf8(name).map_err(|e| {
+        std::io::Error::new(std::io::ErrorKind::InvalidData, e)
+    })?);
+  }
+
+  let mut constraints = Vec::new();
+  for _ in 0..constraints_count {
+    let a = read_linear_combination(&mut reader)?;
+    let b = read_linear_combination(&mut reader)?;
+    let c = read_linear_combination(&mut reader)?;
+    constraints.push(R1CSConstraint { a, b, c });
+  }
+
+  Ok(R1CSGenerator {
+    constraints,
+    temp_var_counter: 0,
+    symbol_map: HashMap::new(),
+    pub_inputs,
+    witnesses,
+    logger: None,
+  })
+}
+
+fn read_linear_combination<R: Read>(reader: &mut R) -> std::io::Result<LinearCombination> {
+  let mut buf = [0u8; 4];
+  reader.read_exact(&mut buf)?;
+  let terms_count = u32::from_le_bytes(buf);
+  
+  let mut terms = Vec::new();
+  for _ in 0..terms_count {
+    reader.read_exact(&mut buf)?;
+    let var_idx = u32::from_le_bytes(buf);
+    
+    let mut coeff_buf = [0u8; 8];
+    reader.read_exact(&mut coeff_buf)?;
+    let coeff = i64::from_le_bytes(coeff_buf);
+    
+    terms.push((format!("var_{}", var_idx), coeff));
+  }
+  
+  Ok(LinearCombination { terms })
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use tempfile::tempdir;
+  use crate::pipeline::CompilerPipeline;
+  use std::fs;
+  use std::path::PathBuf;
+
+  #[test]
+  fn test_r1cs_roundtrip() -> std::io::Result<()> {
+    let dir = tempdir()?;
+    let test_file_path = dir.path().join("test.r1cs");
+
+    let mut generator = R1CSGenerator::new_without_logger();
+    
+    generator.pub_inputs = vec!["x".to_string(), "y".to_string()];
+    generator.witnesses = vec!["w1".to_string()];
+    generator.constraints = vec![
+      R1CSConstraint {
+        a: LinearCombination { terms: vec![("x".to_string(), 1)] },
+        b: LinearCombination { terms: vec![("y".to_string(), 1)] },
+        c: LinearCombination { terms: vec![("w1".to_string(), 1)] },
+      }
+    ];
+
+    generator.write_r1cs_file(&test_file_path)?;
+
+    let read_back = read_r1cs_file(&test_file_path)?;
+
+    assert_eq!(generator.pub_inputs, read_back.pub_inputs);
+    assert_eq!(generator.witnesses, read_back.witnesses);
+    assert_eq!(generator.constraints.len(), read_back.constraints.len());
+    
+    dir.close()?;
+
+    Ok(())
+  }
+
+  #[test]
+  fn test_multiply_proof() -> std::io::Result<()> {
+    let source_path = PathBuf::from("../examples/multiply/multiply.lof");
+    let source_string = fs::read_to_string(&source_path)?;
+    
+    let pipeline = CompilerPipeline::new(source_string, false);
+    pipeline.run(&source_path).expect("Compilation failed");
+    
+    let r1cs_path = source_path.with_file_name("Multiply.r1cs");
+    let r1cs = read_r1cs_file(&r1cs_path)?;
+    
+    assert_eq!(r1cs.pub_inputs.len(), 3);
+    assert_eq!(r1cs.constraints.len(), 2);
+    
+    let constraint = &r1cs.constraints[0];
+    assert_eq!(constraint.a.terms.len(), 1);
+    assert_eq!(constraint.b.terms.len(), 1);
+    assert_eq!(constraint.c.terms.len(), 1);
+    
+    Ok(())
+  }
+}
+
