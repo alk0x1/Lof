@@ -36,7 +36,10 @@ pub enum Keyword {
   Assert,         // assert constraint
   Verify,         // verify constraint
   Where,          // type constraints
-  Let             // let binding
+  Let,            // let binding
+  
+  // Refined type
+  Refined         // No comma after the last item
 }
 
 #[derive(Debug, Clone, PartialEq, Copy)]
@@ -68,10 +71,18 @@ pub enum Symbol {
   Minus,          // -
   Star,           // *
   Slash,          // /
+
+  // Comparison operators
+  Lt,             // <
+  Gt,             // >
+  Le,             // <=
+  Ge,             // >=
+  Ne,             // !=
+  Not,            // !
   
   // Type operators
   Range,          // ..
-  Underscore,     // _
+  Underscore     // _
 }
 
 pub struct Lexer {
@@ -91,7 +102,7 @@ impl Lexer {
     }
   }
 
-  pub fn next_token(&mut self) -> Token {
+    pub fn next_token(&mut self) -> Token {
     self.skip_whitespace();
     
     if self.position >= self.input.len() {
@@ -99,32 +110,54 @@ impl Lexer {
     }
 
     match self.current_char() {
-      // Brackets and braces
       '{' => self.advance_with(Token::Symbol(Symbol::LBrace)),
       '}' => self.advance_with(Token::Symbol(Symbol::RBrace)),
       '(' => self.advance_with(Token::Symbol(Symbol::LParen)),
       ')' => self.advance_with(Token::Symbol(Symbol::RParen)),
       '[' => self.advance_with(Token::Symbol(Symbol::LBracket)),
       ']' => self.advance_with(Token::Symbol(Symbol::RBracket)),
-      '<' => self.advance_with(Token::Symbol(Symbol::LAngle)),
-      '>' => self.advance_with(Token::Symbol(Symbol::RAngle)),
-      
-      // Punctuation
+      '<' => {
+        if self.peek() == Some('=') {
+          self.position += 2;
+          self.column += 2;
+          Token::Symbol(Symbol::Le)
+        } else {
+          self.advance_with(Token::Symbol(Symbol::LAngle))
+        }
+      },
+      '>' => {
+        if self.peek() == Some('=') {
+          self.position += 2;
+          self.column += 2;
+          Token::Symbol(Symbol::Ge)
+        } else {
+          self.advance_with(Token::Symbol(Symbol::RAngle))
+        }
+      },
       ':' => self.advance_with(Token::Symbol(Symbol::Colon)),
       ';' => self.advance_with(Token::Symbol(Symbol::Semi)),
       ',' => self.advance_with(Token::Symbol(Symbol::Comma)),
       '|' => self.advance_with(Token::Symbol(Symbol::Pipe)),
-      
-      // Operators
       '=' => {
         if self.peek() == Some('=') && self.peek_ahead(2) == Some('=') {
           self.position += 3;
+          self.column += 3;
           Token::Symbol(Symbol::TripleEqual)
         } else if self.peek() == Some('>') {
           self.position += 2;
+          self.column += 2;
           Token::Symbol(Symbol::FatArrow)
         } else {
           self.advance_with(Token::Symbol(Symbol::Equals))
+        }
+      },
+      '!' => {
+        if self.peek() == Some('=') {
+          self.position += 2;
+          self.column += 2;
+          Token::Symbol(Symbol::Ne)
+        } else {
+          self.advance_with(Token::Symbol(Symbol::Not))
         }
       },
       '+' => self.advance_with(Token::Symbol(Symbol::Plus)),
@@ -134,19 +167,14 @@ impl Lexer {
       '.' => {
         if self.peek() == Some('.') {
           self.position += 2;
+          self.column += 2;
           Token::Symbol(Symbol::Range)
         } else {
           self.advance_with(Token::Symbol(Symbol::Dot))
         }
       },
-      
-      // Identifiers and keywords
       c if c.is_alphabetic() => self.read_identifier(),
-      
-      // Numbers
       c if c.is_numeric() => self.read_number(),
-      
-      // Unexpected character
       c => {
         let error_pos = (self.line, self.column);
         panic!("Unexpected character '{}' at {:?}", c, error_pos);
@@ -154,7 +182,7 @@ impl Lexer {
     }
   }
 
-  fn read_identifier(&mut self) -> Token {
+    fn read_identifier(&mut self) -> Token {
     let start = self.position;
     while self.position < self.input.len() && 
           (self.input[self.position].is_alphanumeric() || self.input[self.position] == '_') {
@@ -164,7 +192,6 @@ impl Lexer {
     
     let identifier: String = self.input[start..self.position].iter().collect();
     match identifier.as_str() {
-      // Keywords
       "proof" => Token::Keyword(Keyword::Proof),
       "component" => Token::Keyword(Keyword::Component),
       "enum" => Token::Keyword(Keyword::Enum),
@@ -183,7 +210,9 @@ impl Lexer {
       "where" => Token::Keyword(Keyword::Where),
       "let" => Token::Keyword(Keyword::Let),
       
-      // Not a keyword
+      "refined" => Token::Keyword(Keyword::Refined),
+      "Refined" => Token::Keyword(Keyword::Refined),
+      
       _ => Token::Identifier(identifier),
     }
   }

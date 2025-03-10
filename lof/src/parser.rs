@@ -232,7 +232,25 @@ impl<T: Iterator<Item = Token>> Parser<T> {
           self.expect(Token::Symbol(Symbol::Range))?;
           let max = self.parse_expression()?;
           self.expect(Token::Symbol(Symbol::RAngle))?;
-          Ok(Type::FieldRange(Box::new(min), Box::new(max)))
+          
+          let refinement = Expression::BinaryOp {
+            left: Box::new(Expression::BinaryOp {
+              left: Box::new(Expression::Variable("self".to_string())),
+              op: Operator::Ge,
+              right: Box::new(min.clone())
+            }),
+            op: Operator::And,
+            right: Box::new(Expression::BinaryOp {
+              left: Box::new(Expression::Variable("self".to_string())),
+              op: Operator::Lt,
+              right: Box::new(max.clone())
+            })
+          };
+          
+          Ok(Type::Refined(
+            Box::new(Type::Field),
+            Box::new(refinement)
+          ))
         } else {
           Ok(Type::Field)
         }
@@ -251,11 +269,26 @@ impl<T: Iterator<Item = Token>> Parser<T> {
         self.expect(Token::Symbol(Symbol::RAngle))?;
         Ok(Type::Array(element_type, size))
       }
+
       Some(Token::Keyword(Keyword::Nat)) => Ok(Type::Nat),
       Some(Token::Keyword(Keyword::Bool)) => Ok(Type::Bool),
+
+      Some(Token::Keyword(Keyword::Refined)) => {
+        self.expect(Token::Symbol(Symbol::LBrace))?;
+        let base_type = Box::new(self.parse_type()?);
+        self.expect(Token::Symbol(Symbol::Comma))?;
+        let refinement = Box::new(self.parse_expression()?);
+        self.expect(Token::Symbol(Symbol::RBrace))?;
+        Ok(Type::Refined(base_type, refinement))
+      }
+
       Some(Token::Identifier(name)) => {
-        Ok(Type::Custom(name))
-      },
+        if self.peek() == Some(&Token::Symbol(Symbol::LAngle)) {
+          Ok(Type::GenericType(name))
+        } else {
+          Ok(Type::Custom(name))
+        }
+      }
       Some(token) => Err(ParseError::UnexpectedToken(token)),
       None => Err(ParseError::UnexpectedEOF),
     }

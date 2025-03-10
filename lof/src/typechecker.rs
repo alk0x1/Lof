@@ -1,4 +1,4 @@
-use crate::{ast, ast::{Constraint, Expression, Operator, Signal, Type}};
+use crate::{ast, ast::{Constraint, Expression, Operator, Signal, Type, Visibility}};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
@@ -25,6 +25,10 @@ pub enum TypeError {
     degree: u32,
   },
   UnconstrainedPath,
+  RefinementViolation {
+    expr: Box<Expression>,
+    refinement: Box<Expression>
+  }
 }
 
 impl fmt::Display for TypeError {
@@ -51,6 +55,8 @@ impl fmt::Display for TypeError {
       TypeError::DegreeViolation { expr, degree } => 
         write!(f, "Degree violation: expression {:?} has degree {}", expr, degree),
       TypeError::UnconstrainedPath => write!(f, "Unconstrained execution path"),
+      TypeError::RefinementViolation { expr, refinement } => 
+        write!(f, "Refinement violation: expression {:?} does not satisfy {:?}", expr, refinement),
     }
   }
 }
@@ -59,25 +65,31 @@ pub struct TypeChecker {
   // Symbol table for variables and their types
   symbols: HashMap<String, Type>,
   // Track resource usage
-  used_vars: HashMap<String, usize>,           // Linear Types
-  // New fields for enhanced checking
-  dependencies: HashMap<String, Vec<String>>,  // Track variable dependencies
-  degrees: HashMap<String, u32>,              // Track polynomial degrees (Dependent Types)
-  constrained_paths: bool,                    // Track if all paths lead to constraints
-  public_signals: usize,                      // Count of public signals
-  constraint_count: usize,                    // Count of constraints
+  usage_count: HashMap<String, usize>,
+  // Track polynomial degrees (Dependent Types)
+  expression_degrees: HashMap<String, u32>,
+  // Track dependencies between variables
+  dependencies: HashMap<String, Vec<String>>,
+  // Track whether paths are constrained
+  constrained_paths: bool,
+  // Circuit statistics
+  public_signals: usize,
+  constraint_count: usize,
+  // Signal definitions
+  signals: Vec<Signal>,
 }
 
 impl TypeChecker {
   pub fn new() -> Self {
     TypeChecker {
       symbols: HashMap::new(),
-      used_vars: HashMap::new(),
+      usage_count: HashMap::new(),
+      expression_degrees: HashMap::new(),
       dependencies: HashMap::new(),
-      degrees: HashMap::new(),
       constrained_paths: false,
       public_signals: 0,
       constraint_count: 0,
+      signals: Vec::new(),
     }
   }
 
@@ -97,33 +109,19 @@ impl TypeChecker {
     }
   }
 
-  fn check_basic_structure(&mut self, signals: &[Signal], constraints: &[Constraint]) -> Result<(), TypeError> {
-    let has_public = signals.iter().any(|s| 
-      matches!(s.visibility, ast::Visibility::Input | ast::Visibility::Output)
-    );
-    if !has_public {
-      return Err(TypeError::NoPublicSignals);
-    }
-
-    if constraints.is_empty() {
-      return Err(TypeError::NoConstraints);
-    }
-
-    Ok(())
-  }
-
   fn build_dependency_graph(&mut self, constraints: &[Constraint]) -> Result<(), TypeError> {
     for constraint in constraints {
       match constraint {
         Constraint::Assert(expr) | Constraint::Verify(expr) => {
-          self.collect_dependencies(expr)?;
+          let deps = self.collect_dependencies(expr)?;
+          for dep in deps {
+            self.dependencies.entry(dep).or_insert_with(Vec::new);
+          }
         }
         _ => {}
       }
     }
-    self.check_circular_dependencies()?;
-    
-    Ok(())
+    self.check_circular_dependencies()
   }
 
   fn collect_dependencies(&mut self, expr: &Expression) -> Result<Vec<String>, TypeError> {
@@ -136,7 +134,137 @@ impl TypeChecker {
         deps.extend(self.collect_dependencies(right)?);
         Ok(deps)
       }
+      Expression::FunctionCall { function: _, arguments } => {
+        let mut deps = Vec::new();
+        for arg in arguments {
+          deps.extend(self.collect_dependencies(arg)?);
+        }
+        Ok(deps)
+      }
+      Expression::Number(_) => Ok(vec![]),
       _ => Ok(vec![])
+    }
+  }
+
+  fn check_type(&mut self, expr: &Expression, expected: &Type) -> Result<(), TypeError> {
+    match expected {
+      Type::Refined(base_type, refinement) => {
+        // First check the base type
+        self.check_type(expr, base_type)?;
+        // Then verify the refinement
+        self.verify_refinement(expr, refinement)
+      }
+      Type::Field => self.check_field_type(expr),
+      Type::Bits(size) => self.check_bits_type(expr, size),
+      Type::Array(elem_type, size) => self.check_array_type(expr, elem_type, size),
+      Type::Bool => self.check_bool_type(expr),
+      Type::Nat => self.check_nat_type(expr),
+      Type::Custom(name) => self.check_custom_type(expr, name),
+      Type::GenericType(param) => self.check_generic_type(expr, param),
+      Type::Unit => Ok(())
+    }
+  }
+
+  fn check_field_type(&mut self, expr: &Expression) -> Result<(), TypeError> {
+    let typ = self.check_expression(expr)?;
+    if !matches!(typ, Type::Field) {
+      return Err(TypeError::TypeMismatch {
+        expected: Type::Field,
+        found: typ,
+      });
+    }
+    Ok(())
+  }
+
+  fn check_bits_type(&mut self, expr: &Expression, size: &Expression) -> Result<(), TypeError> {
+    let typ = self.check_expression(expr)?;
+    if !matches!(typ, Type::Bits(_)) {
+      return Err(TypeError::TypeMismatch {
+        expected: Type::Bits(Box::new(size.clone())),
+        found: typ,
+      });
+    }
+    Ok(())
+  }
+
+  fn check_array_type(&mut self, expr: &Expression, elem_type: &Type, size: &Expression) -> Result<(), TypeError> {
+    let typ = self.check_expression(expr)?;
+    if let Type::Array(actual_elem, actual_size) = typ {
+      if !self.types_match(&actual_elem, elem_type) {
+        return Err(TypeError::TypeMismatch {
+          expected: Type::Array(Box::new(elem_type.clone()), Box::new(size.clone())),
+          found: Type::Array(actual_elem, actual_size),
+        });
+      }
+    } else {
+      return Err(TypeError::TypeMismatch {
+        expected: Type::Array(Box::new(elem_type.clone()), Box::new(size.clone())),
+        found: typ,
+      });
+    }
+    Ok(())
+  }
+
+  fn check_bool_type(&mut self, expr: &Expression) -> Result<(), TypeError> {
+    let typ = self.check_expression(expr)?;
+    if !matches!(typ, Type::Bool) {
+      return Err(TypeError::TypeMismatch {
+        expected: Type::Bool,
+        found: typ,
+      });
+    }
+    Ok(())
+  }
+
+  fn check_nat_type(&mut self, expr: &Expression) -> Result<(), TypeError> {
+    let typ = self.check_expression(expr)?;
+    if !matches!(typ, Type::Nat) {
+      return Err(TypeError::TypeMismatch {
+        expected: Type::Nat,
+        found: typ,
+      });
+    }
+    Ok(())
+  }
+
+  fn check_custom_type(&mut self, expr: &Expression, name: &str) -> Result<(), TypeError> {
+    let typ = self.check_expression(expr)?;
+    if !matches!(typ, Type::Custom(ref n) if n == name) {
+      return Err(TypeError::TypeMismatch {
+        expected: Type::Custom(name.to_string()),
+        found: typ,
+      });
+    }
+    Ok(())
+  }
+
+  fn verify_refinement(&mut self, expr: &Expression, refinement: &Expression) -> Result<(), TypeError> {
+    // Convert refinement to constraint
+    let constraint = Constraint::Assert(Box::new(refinement.clone()));
+    match self.check_constraint(&constraint) {
+      Ok(_) => Ok(()),
+      Err(_) => Err(TypeError::RefinementViolation {
+        expr: Box::new(expr.clone()),
+        refinement: Box::new(refinement.clone())
+      })
+    }
+  }
+
+  fn substitute_in_refinement(&self, expr: &Expression, refinement: &Expression) -> Result<Expression, TypeError> {
+    // TODO: implement logic to handle all possible expression types
+
+    match refinement {
+      Expression::Variable(name) if name == "self" => Ok(expr.clone()),
+      Expression::BinaryOp { left, op, right } => {
+        let new_left = self.substitute_in_refinement(expr, left)?;
+        let new_right = self.substitute_in_refinement(expr, right)?;
+        Ok(Expression::BinaryOp {
+          left: Box::new(new_left),
+          op: *op,
+          right: Box::new(new_right)
+        })
+      }
+      _ => Ok(refinement.clone())
     }
   }
 
@@ -165,7 +293,7 @@ impl TypeChecker {
 
       // Consider successors of v
       if let Some(deps) = dependencies.get(v) {
-        for &ref w in deps {
+        for w in deps {
           if !indices.contains_key(w) {
             // Successor w has not yet been visited; recurse on it
             strongconnect(w, index, stack, indices, lowlinks, on_stack, dependencies)?;
@@ -181,30 +309,30 @@ impl TypeChecker {
         }
       }
 
-        // If v is a root node, pop the stack and generate an SCC
-        if let Some(v_lowlink) = lowlinks.get(v) {
-          if let Some(v_index) = indices.get(v) {
-            if v_lowlink == v_index {
-              // Found a strongly connected component
-              let mut cycle = Vec::new();
-              loop {
-                let w = stack.pop().unwrap();
-                on_stack.remove(&w);
-                cycle.push(w.clone());
-                if w == v {
-                  break;
-                }
+      // If v is a root node, pop the stack and generate an SCC
+      if let Some(v_lowlink) = lowlinks.get(v) {
+        if let Some(v_index) = indices.get(v) {
+          if v_lowlink == v_index {
+            // Found a strongly connected component
+            let mut cycle = Vec::new();
+            loop {
+              let w = stack.pop().unwrap();
+              on_stack.remove(&w);
+              cycle.push(w.clone());
+              if w == v {
+                break;
               }
-              if cycle.len() > 1 {
-                return Err(TypeError::CircularDependency(
-                  cycle.join(" -> ")
-                ));
-              }
+            }
+            if cycle.len() > 1 {
+              return Err(TypeError::CircularDependency(
+                cycle.join(" -> ")
+              ));
             }
           }
         }
+      }
 
-        Ok(())
+      Ok(())
     }
 
     // Run Tarjan's algorithm from each unvisited node
@@ -264,32 +392,101 @@ impl TypeChecker {
   }
 
   fn verify_path_constraints(&mut self, expr: &Expression) -> Result<(), TypeError> {
-    match expr {
-      Expression::Proof { constraints, .. } => {
-        for constraint in constraints {
-          match constraint {
-            Constraint::Assert(_) | Constraint::Verify(_) => {
-              self.constrained_paths = true;
-              break;
-            }
-            _ => {}
-          }
+    self.constrained_paths = false;
+    
+    // For proofs, check the constraints directly
+    if let Expression::Proof { constraints, .. } = expr {
+      for constraint in constraints {
+        if matches!(constraint, Constraint::Assert(_) | Constraint::Verify(_)) {
+          self.constrained_paths = true;
+          break;
         }
-        if !self.constrained_paths {
-          return Err(TypeError::UnconstrainedPath);
-        }
-        
-        Ok(())
       }
-      _ => Ok(())
+    } else {
+      // For other expressions, use the existing check
+      self.check_path_constraints(expr)?;
     }
+    
+    if !self.constrained_paths {
+      return Err(TypeError::UnconstrainedPath);
+    }
+    
+    Ok(())
+  }
+
+  fn check_path_constraints(&mut self, expr: &Expression) -> Result<(), TypeError> {
+    match expr {
+      Expression::Block(exprs) => {
+        for expr in exprs {
+          self.check_path_constraints(expr)?;
+        }
+      }
+      Expression::BinaryOp { left, right, op } => {
+        if matches!(op, Operator::Assert) {
+          self.constrained_paths = true;
+        }
+        self.check_path_constraints(left)?;
+        self.check_path_constraints(right)?;
+      }
+      _ => {}
+    }
+    Ok(())
   }
 
   fn collect_signals(&mut self, signals: &[Signal]) -> Result<(), TypeError> {
+    self.signals = signals.to_vec();
     for signal in signals {
       self.symbols.insert(signal.name.clone(), signal.typ.clone());
-      self.used_vars.insert(signal.name.clone(), 0);
+      self.usage_count.insert(signal.name.clone(), 0);
+      
+      if matches!(signal.visibility, Visibility::Input | Visibility::Output) {
+        self.public_signals += 1;
+      }
     }
+    Ok(())
+  }
+
+  fn get_signal(&self, name: &str) -> Option<&Signal> {
+    self.signals.iter().find(|s| s.name == name)
+  }
+
+  fn is_witness(&self, var: &str) -> bool {
+    if let Some(signal) = self.get_signal(var) {
+      matches!(signal.visibility, Visibility::Witness)
+    } else {
+      false
+    }
+  }
+
+  fn verify_resource_usage(&self) -> Result<(), TypeError> {
+    for (var, count) in &self.usage_count {
+      match count {
+        0 => return Err(TypeError::UnusedVariable(var.clone())),
+        &n if n > 1 => {
+          if self.is_witness(var) {
+            return Err(TypeError::ResourceUsageError(
+              format!("Witness {} used {} times", var, n)
+            ));
+          }
+        }
+        _ => {}
+      }
+    }
+    Ok(())
+  }
+
+  fn check_basic_structure(&mut self, signals: &[Signal], constraints: &[Constraint]) -> Result<(), TypeError> {
+    let has_public = signals.iter().any(|s| 
+      matches!(s.visibility, Visibility::Input | Visibility::Output)
+    );
+    if !has_public {
+      return Err(TypeError::NoPublicSignals);
+    }
+
+    if constraints.is_empty() {
+      return Err(TypeError::NoConstraints);
+    }
+
     Ok(())
   }
 
@@ -323,7 +520,7 @@ impl TypeChecker {
   fn check_expression(&mut self, expr: &Expression) -> Result<Type, TypeError> {
     match expr {
       Expression::Variable(name) => {
-        *self.used_vars.entry(name.clone()).or_insert(0) += 1;
+        *self.usage_count.entry(name.clone()).or_insert(0) += 1;
         
         self.symbols.get(name)
           .cloned()
@@ -338,6 +535,7 @@ impl TypeChecker {
       Expression::FunctionCall { function, arguments } => {
         self.check_function_call(function, arguments)
       }
+      Expression::Number(_) => Ok(Type::Field), // Default to Field for numeric literals
       _ => todo!("Implement other expression types")
     }
   }
@@ -367,45 +565,6 @@ impl TypeChecker {
     }
   }
 
-  fn verify_resource_usage(&self) -> Result<(), TypeError> {
-    for (var, count) in &self.used_vars {
-      if *count == 0 {
-        return Err(TypeError::UnusedVariable(var.clone()));
-      }
-      if *count > 1 {
-        return Err(TypeError::ResourceUsageError(
-          format!("Variable {} used {} times", var, count)
-        ));
-      }
-    }
-    Ok(())
-  }
-
-  fn verify_completeness(&self, expr: &Expression) -> Result<(), TypeError> {
-    // Verify pattern matching is exhaustive
-    // Verify all paths lead to constraints
-    todo!("Implement completeness checking")
-  }
-
-  fn check_path_constraints(&mut self, expr: &Expression) -> Result<(), TypeError> {
-    match expr {
-      Expression::Block(exprs) => {
-        for expr in exprs {
-          self.check_path_constraints(expr)?;
-        }
-      }
-      Expression::BinaryOp { left, right, op } => {
-        if matches!(op, Operator::Assert) {
-          self.constrained_paths = true;
-        }
-        self.check_path_constraints(left)?;
-        self.check_path_constraints(right)?;
-      }
-      _ => {}
-    }
-    Ok(())
-  }
-
   fn check_function_call(&mut self, function: &str, arguments: &[Expression]) -> Result<Type, TypeError> {
     match function {
       "decompose" => self.check_decompose(arguments),
@@ -431,9 +590,14 @@ impl TypeChecker {
         match **size {
           Expression::Number(n) => {
             let max = (1 << n) - 1;
-            Ok(Type::FieldRange(
-              Box::new(Expression::Number(0)),
-              Box::new(Expression::Number(max))
+            // Use Refined instead of FieldRange
+            Ok(Type::Refined(
+              Box::new(Type::Field),
+              Box::new(Expression::BinaryOp {
+                left: Box::new(Expression::Variable("self".to_string())),
+                op: Operator::Le,
+                right: Box::new(Expression::Number(max))
+              })
             ))
           },
           _ => Err(TypeError::TypeMismatch {
@@ -446,6 +610,32 @@ impl TypeChecker {
         expected: Type::Bits(Box::new(Expression::Number(8))),
         found: arg_type,
       })
+    }
+  }
+
+  fn types_match(&self, actual: &Type, expected: &Type) -> bool {
+    match (actual, expected) {
+      (Type::Refined(actual_base, _), Type::Refined(expected_base, _)) => {
+        self.types_match(actual_base, expected_base)
+      }
+      (Type::Refined(actual_base, _), expected) => {
+        self.types_match(actual_base, expected)
+      }
+      (actual, Type::Refined(expected_base, _)) => {
+        self.types_match(actual, expected_base)
+      }
+      // Check other type combinations
+      (Type::Field, Type::Field) => true,
+      (Type::Bool, Type::Bool) => true,
+      (Type::Nat, Type::Nat) => true,
+      (Type::Unit, Type::Unit) => true,
+      (Type::Bits(a_size), Type::Bits(b_size)) => a_size == b_size,
+      (Type::Array(a_elem, a_size), Type::Array(b_elem, b_size)) => {
+        self.types_match(a_elem, b_elem) && a_size == b_size
+      }
+      (Type::Custom(a), Type::Custom(b)) => a == b,
+      (Type::GenericType(a), Type::GenericType(b)) => a == b,
+      _ => false
     }
   }
 }

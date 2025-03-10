@@ -78,6 +78,10 @@ impl CompilerPipeline {
     self.logger.start_r1cs_generation();
     let mut r1cs_generator = R1CSGenerator::new(&self.logger);
     
+    let file_stem = source_path.file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("output");
+    
     for proof in &typed_proofs {
       if let Expression::Proof { name, .. } = proof {
         self.logger.converting_proof_to_r1cs(name);
@@ -98,7 +102,7 @@ impl CompilerPipeline {
             );
 
             // Generate R1CS file
-            let r1cs_path = source_path.with_file_name(format!("{}.r1cs", name));
+            let r1cs_path = source_path.with_file_name(format!("{}.r1cs", file_stem));
             self.logger.writing_r1cs(&r1cs_path);
             
             match r1cs_generator.write_r1cs_file(&r1cs_path) {

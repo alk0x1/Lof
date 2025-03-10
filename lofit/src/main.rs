@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
+use lofit::generate_full_witness;
 
 #[derive(Parser)]
 #[command(name = "lofit")]
@@ -32,7 +33,7 @@ enum Commands {
     #[arg(short = 'u', long = "public-inputs")]
     public_inputs: PathBuf,
     #[arg(short, long)]
-    witness: PathBuf,
+    witness: Option<PathBuf>,
     #[arg(short, long)]
     output: PathBuf,
   },
@@ -92,20 +93,40 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
       println!("Reading inputs...");
       let pub_inputs: InputsJson = serde_json::from_reader(File::open(public_inputs)?)?;
-      let wit_inputs: InputsJson = serde_json::from_reader(File::open(witness)?)?;
 
       println!("\nPublic inputs from JSON: {:?}", pub_inputs.inputs);
-      println!("Witness inputs from JSON: {:?}", wit_inputs.inputs);
 
       let pub_values: Vec<Fr> = pub_inputs.inputs
         .iter()
         .map(|s| fr_from_str(s))
         .collect::<Result<Vec<_>, _>>()?;
+        println!("Generating full witness...");
+        let auto_witness = generate_full_witness(&r1cs, &pub_values)?;
+        
+        let wit_values = if let Some(witness_path) = witness {
+          println!("Reading witness from {:?}", witness_path);
+          let wit_inputs: InputsJson = serde_json::from_reader(File::open(witness_path)?)?;
+          println!("Witness inputs from JSON: {:?}", wit_inputs.inputs);
+            
+          wit_inputs.inputs
+            .iter()
+            .map(|s| fr_from_str(s))
+            .collect::<Result<Vec<_>, _>>()?
+        } else {
+          println!("Using auto-generated witness");
+          auto_witness
+        };
 
-      let wit_values: Vec<Fr> = wit_inputs.inputs
-        .iter()
-        .map(|s| fr_from_str(s))
-        .collect::<Result<Vec<_>, _>>()?;
+        let full_witness = InputsJson {
+          inputs: wit_values.iter().map(|fr| fr.to_string()).collect()
+        };
+        let witness_path = output.with_file_name("full_witness.json");
+        println!("Saving full witness to {:?}", witness_path);
+        serde_json::to_writer_pretty(
+          File::create(&witness_path)?,
+          &full_witness
+        )?;
+
 
       println!("\nConverted field elements:");
       for (i, val) in pub_values.iter().enumerate() {

@@ -63,7 +63,6 @@ impl VerifierKey {
           println!("Error reading verification key: {:?}", e);
           std::io::Error::new(std::io::ErrorKind::Other, e)
         })?;
-      println!("Read verification key: {:?}", vk);
       Ok(Self { vk })
     }
 }

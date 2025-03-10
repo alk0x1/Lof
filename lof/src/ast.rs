@@ -1,14 +1,37 @@
+use std::fmt;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
-  Field,
-  FieldRange(Box<Expression>, Box<Expression>),
-  Bits(Box<Expression>),
-  Array(Box<Type>, Box<Expression>),
-  Nat,
-  Bool,
-  Custom(String),
-  GenericType(String),
-  Unit,
+    // Core types
+    Field,
+    Bits(Box<Expression>),
+    Array(Box<Type>, Box<Expression>),
+    Nat,
+    Bool,
+    
+    // Type abstractions
+    Custom(String),
+    GenericType(String),
+    
+    Unit,
+    
+    Refined(Box<Type>, Box<Expression>)  // Types with predicates
+}
+
+impl fmt::Display for Type {
+  fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    match self {
+      Type::Field => write!(f, "Field"),
+      Type::Bits(size) => write!(f, "Bits<{:?}>", size),
+      Type::Array(elem_type, size) => write!(f, "Array<{}, {:?}>", elem_type, size),
+      Type::Nat => write!(f, "Nat"),
+      Type::Bool => write!(f, "Bool"),
+      Type::Custom(name) => write!(f, "{}", name),
+      Type::GenericType(name) => write!(f, "{}", name),
+      Type::Unit => write!(f, "()"),
+      Type::Refined(base, expr) => write!(f, "Refined<{}, {:?}>", base, expr),
+    }
+  }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -50,22 +73,16 @@ pub enum Expression {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Signal {
-  pub name: String,
-  pub visibility: Visibility,
-  pub typ: Type,
+    pub name: String,
+    pub visibility: Visibility,
+    pub typ: Type,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Visibility {
-  Input,
-  Witness,
-  Output,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct MatchPattern {
-  pub pattern: Pattern,
-  pub body: Box<Expression>,
+    Input,
+    Witness,    // implicitly linear
+    Output
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -77,6 +94,12 @@ pub enum Pattern {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct MatchPattern {
+  pub pattern: Pattern,
+  pub body: Box<Expression>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Constraint {
   Assert(Box<Expression>),
   Verify(Box<Expression>),
@@ -84,13 +107,7 @@ pub enum Constraint {
   Match(Box<Expression>),
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct GenericParam {
-  pub name: String,
-  pub bound: Option<Type>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Copy)]
 pub enum Operator {
   Add,
   Sub,
@@ -103,4 +120,11 @@ pub enum Operator {
   Ge,
   Eq,
   Decompose,
+  And
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GenericParam {
+  pub name: String,
+  pub bound: Option<Type>
 }

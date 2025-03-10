@@ -157,21 +157,21 @@ impl<'a> R1CSGenerator<'a> {
   }
 
   fn convert_assertion(&mut self, expr: &Expression) -> Result<(), R1CSError> {
-      match expr {
-          Expression::BinaryOp { left, op: Operator::Assert, right } => {
-              let a = self.convert_to_linear_combination(left)?;
-              let b = self.convert_to_linear_combination(right)?;
+    match expr {
+      Expression::BinaryOp { left, op: Operator::Assert, right } => {
+        let a = self.convert_to_linear_combination(left)?;
+        let b = self.convert_to_linear_combination(right)?;
 
-              self.constraints.push(R1CSConstraint {
-                  a,
-                  b: LinearCombination { terms: vec![("ONE".to_string(), 1)] },
-                  c: b
-              });
-              
-              Ok(())
-          }
-          _ => Err(R1CSError::InvalidArgument("Expected assertion".to_string()))
+        self.constraints.push(R1CSConstraint {
+          a,
+          b: LinearCombination { terms: vec![("ONE".to_string(), 1)] },
+          c: b
+        });
+        
+        Ok(())
       }
+      _ => Err(R1CSError::InvalidArgument("Expected assertion".to_string()))
+    }
   }
 
   fn convert_to_linear_combination(&mut self, expr: &Expression) -> Result<LinearCombination, R1CSError> {

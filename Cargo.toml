@@ -1,6 +1,6 @@
 [workspace]
 members = [
     "lof",
-    "cli"
-]
+    "cli", 
+    "lofit"]
 resolver = "2"
