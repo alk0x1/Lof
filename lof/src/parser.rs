@@ -2,6 +2,7 @@ use crate::lexer::{Token, Keyword, Symbol};
 use crate::ast::{Expression, Type, Signal, Visibility, Pattern, Constraint, Operator, GenericParam, MatchPattern};
 use std::iter::Peekable;
 use std::fmt;
+use tracing::debug;
 
 pub struct Parser<T: Iterator<Item = Token>> {
   tokens: Peekable<T>,
@@ -24,7 +25,6 @@ impl<T: Iterator<Item = Token>> Parser<T> {
     }
   }
 
-  // Helper methods
   fn peek(&mut self) -> Option<&Token> {
     self.tokens.peek()
   }
@@ -37,8 +37,8 @@ impl<T: Iterator<Item = Token>> Parser<T> {
     }
   }
 
-  // Main parsing methods
-  pub fn parse_program(&mut self) -> ParseResult<Vec<Expression>> {
+/// Grammar: `Program ::= (Proof | Component)*`
+pub fn parse_program(&mut self) -> ParseResult<Vec<Expression>> {
     let mut declarations = Vec::new();
     while let Some(token) = self.peek() {
       match token {
@@ -54,7 +54,8 @@ impl<T: Iterator<Item = Token>> Parser<T> {
     }
     Ok(declarations)
   }
-
+  
+  /// Grammar: `Proof ::= "proof" Identifier GenericParams? "{" ProofBody "}"`
   fn parse_proof(&mut self) -> ParseResult<Expression> {
     self.expect(Token::Keyword(Keyword::Proof))?;
     
@@ -84,6 +85,9 @@ impl<T: Iterator<Item = Token>> Parser<T> {
     })
   }
 
+  /// Grammar: `ProofBody ::= (Signal | Constraint)*`
+  /// where Signal ::= ("input" | "witness" | "output") Identifier ":" Type ";"
+  /// and Constraint ::= Assert | Verify | Let | Match
   fn parse_proof_body(&mut self) -> ParseResult<(Vec<Signal>, Vec<Constraint>)> {
     let mut signals = Vec::new();
     let mut constraints = Vec::new();
@@ -116,18 +120,20 @@ impl<T: Iterator<Item = Token>> Parser<T> {
     Ok((signals, constraints))
   }
 
+  /// Grammar: `Block ::= "{" Statement* "}"`
+  /// where Statement ::= Let | Expression ";"?
   fn parse_block(&mut self) -> ParseResult<Expression> {
-    println!("Entering parse_block");
+    debug!("Entering parse_block");
     self.expect(Token::Symbol(Symbol::LBrace))?;
     
     let mut statements = Vec::new();
     
     while let Some(token) = self.peek() {
-      println!("Block parsing token: {:?}", token);
+      debug!("Block parsing token: {:?}", token);
       
       if token == &Token::Symbol(Symbol::RBrace) {
         self.tokens.next();
-        println!("Exiting block on RBrace");
+        debug!("Exiting block on RBrace");
         break;
       }
 
@@ -157,6 +163,7 @@ impl<T: Iterator<Item = Token>> Parser<T> {
     }
   }
 
+  /// Grammar: `GenericParams ::= "<" (GenericParam ("," GenericParam)*)? ">"`
   fn parse_generic_params(&mut self) -> ParseResult<Vec<GenericParam>> {
     self.expect(Token::Symbol(Symbol::LAngle))?;
     
@@ -184,6 +191,7 @@ impl<T: Iterator<Item = Token>> Parser<T> {
     Ok(params)
   }
 
+  /// Grammar: `GenericParam ::= Identifier (":" Type)?`
   fn parse_generic_param(&mut self) -> ParseResult<GenericParam> {
     let name = match self.tokens.next() {
       Some(Token::Identifier(name)) => name,
@@ -201,6 +209,7 @@ impl<T: Iterator<Item = Token>> Parser<T> {
     Ok(GenericParam { name, bound })
   }
 
+  /// Grammar: `Signal ::= ("input" | "witness" | "output") Identifier ":" Type ";"`
   fn parse_signal(&mut self) -> ParseResult<Signal> {
     let visibility = match self.tokens.next() {
       Some(Token::Keyword(Keyword::Input)) => Visibility::Input,
@@ -223,6 +232,12 @@ impl<T: Iterator<Item = Token>> Parser<T> {
     Ok(Signal { name, visibility, typ })
   }
 
+  /// Grammar: `Type ::= "field" ("<" Expression ".." Expression ">")?
+  ///                  | "bits" "<" Expression ">"
+  ///                  | "array" "<" Type "," Expression ">"
+  ///                  | "nat" | "bool"
+  ///                  | "refined" "{" Type "," Expression "}"
+  ///                  | Identifier ("<" ...)?`
   fn parse_type(&mut self) -> ParseResult<Type> {
     match self.tokens.next() {
       Some(Token::Keyword(Keyword::Field)) => {
@@ -294,6 +309,7 @@ impl<T: Iterator<Item = Token>> Parser<T> {
     }
   }
 
+  /// Grammar: `Expression ::= Match | Let | BinaryExpression`
   fn parse_expression(&mut self) -> ParseResult<Expression> {
     match self.peek() {
       Some(Token::Keyword(Keyword::Match)) => self.parse_match_expression(),
@@ -302,6 +318,8 @@ impl<T: Iterator<Item = Token>> Parser<T> {
     }
   }
 
+  /// Grammar: `BinaryExpression ::= PrimaryExpression (Operator PrimaryExpression)*`
+  /// with operator precedence: Assert(1) < Add,Sub(2) < Mul(3)
   fn parse_binary_expression(&mut self) -> ParseResult<Expression> {
     let mut expr_stack = vec![self.parse_primary_expression()?];
     let mut op_stack = Vec::new();
@@ -359,6 +377,8 @@ impl<T: Iterator<Item = Token>> Parser<T> {
     Ok(expr_stack.pop().unwrap())
   }
 
+  /// Grammar: `PrimaryExpression ::= Number | FunctionCall | Variable | Match`
+  /// where FunctionCall ::= Identifier "(" (Expression ("," Expression)*)? ")"
   fn parse_primary_expression(&mut self) -> ParseResult<Expression> {
     match self.tokens.next() {
       Some(Token::Number(n)) => Ok(Expression::Number(n)),
@@ -398,6 +418,8 @@ impl<T: Iterator<Item = Token>> Parser<T> {
     }
   }
 
+  /// Grammar: `Match ::= "match" Expression "{" MatchArm* "}"`
+  /// where MatchArm ::= Pattern "=>" Block ","?
   fn parse_match_expression(&mut self) -> ParseResult<Expression> {
     self.expect(Token::Keyword(Keyword::Match))?;
     let value = Box::new(self.parse_expression()?);
@@ -428,6 +450,10 @@ impl<T: Iterator<Item = Token>> Parser<T> {
     Ok(Expression::Match { value, patterns })
   }
 
+  /// Grammar: `Pattern ::= Constructor | Variable | Wildcard`
+  /// where Constructor ::= Identifier "(" (Pattern ("," Pattern)*)? ")"
+  /// and Variable ::= Identifier
+  /// and Wildcard ::= "_"
   fn parse_pattern(&mut self) -> ParseResult<Pattern> {
     match self.tokens.next() {
       Some(Token::Identifier(name)) => {
@@ -463,6 +489,7 @@ impl<T: Iterator<Item = Token>> Parser<T> {
     }
   }
 
+  /// Grammar: `Component ::= "component" Identifier GenericParams? "{" ProofBody "}"`
   fn parse_component(&mut self) -> ParseResult<Expression> {
     self.expect(Token::Keyword(Keyword::Component))?;
     
@@ -492,6 +519,7 @@ impl<T: Iterator<Item = Token>> Parser<T> {
     })
   }
 
+  /// Grammar: `Let ::= "let" Identifier "=" Expression ";" Expression`
   fn parse_let_binding(&mut self) -> ParseResult<Expression> {
     self.expect(Token::Keyword(Keyword::Let))?;
     
@@ -518,6 +546,9 @@ impl<T: Iterator<Item = Token>> Parser<T> {
     })
   }
 
+  /// Grammar: `Constraint ::= Assert | Verify | Match | Let`
+  /// where Assert ::= "assert" Expression ";"
+  /// and Verify ::= "verify" Expression ";"
   pub fn parse_constraint(&mut self) -> ParseResult<Constraint> {
     match self.tokens.next() {
       Some(Token::Keyword(Keyword::Assert)) => {

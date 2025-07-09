@@ -1,5 +1,6 @@
 use std::{collections::HashMap, io::{Read, Seek, Write}, path::PathBuf};
-use crate::{ast::{self, Constraint, Expression, Operator}, logger::CompilerLogger};
+use crate::ast::{self, Constraint, Expression, Operator};
+use tracing::{info, warn, error, debug};
 use std::fmt;
 
 #[derive(Debug)]
@@ -24,35 +25,22 @@ pub struct LinearCombination {
   pub terms: Vec<(String, i64)>,
 }
 
-pub struct R1CSGenerator<'a> {
+pub struct R1CSGenerator {
   pub constraints: Vec<R1CSConstraint>,
   pub temp_var_counter: usize,
   pub symbol_map: HashMap<String, usize>,
   pub pub_inputs: Vec<String>,
   pub witnesses: Vec<String>,
-  logger: Option<&'a CompilerLogger>,
 }
 
-impl<'a> R1CSGenerator<'a> {
-  pub fn new(logger: &'a CompilerLogger) -> Self {
+impl R1CSGenerator {
+  pub fn new() -> Self {
     Self {
       constraints: Vec::new(),
       temp_var_counter: 0,
       symbol_map: HashMap::new(),
       pub_inputs: Vec::new(),
       witnesses: Vec::new(),
-      logger: Some(logger),
-    }
-  }
-  
-  pub fn new_without_logger() -> Self {
-    Self {
-      constraints: Vec::new(),
-      temp_var_counter: 0,
-      symbol_map: HashMap::new(),
-      pub_inputs: Vec::new(),
-      witnesses: Vec::new(),
-      logger: None,
     }
   }
   
@@ -65,9 +53,7 @@ impl<'a> R1CSGenerator<'a> {
     r1cs_path.push(source_path.file_stem().unwrap());
     r1cs_path.set_extension("r1cs");
     
-    if let Some(logger) = self.logger {
-      logger.writing_r1cs(&r1cs_path);
-    }
+    info!("Writing R1CS file to: {}", r1cs_path.display());
 
     let file = std::fs::File::create(&r1cs_path)?;
     let mut writer = std::io::BufWriter::new(file);
@@ -96,9 +82,19 @@ impl<'a> R1CSGenerator<'a> {
     }
 
     let metadata = std::fs::metadata(&r1cs_path)?;
-    if let Some(logger) = self.logger {
-      logger.r1cs_write_success(&r1cs_path, metadata.len(), self.constraints.len());
-    }
+    info!(
+      "Successfully wrote {} bytes to {} ({} constraints)",
+      metadata.len(),
+      r1cs_path.display(),
+      self.constraints.len()
+    );
+
+    debug!(
+      "R1CS metadata: pub_inputs={}, witnesses={}, constraints={}",
+      self.pub_inputs.len(),
+      self.witnesses.len(),
+      self.constraints.len()
+    );
 
     Ok(metadata.len())
   }
@@ -424,7 +420,6 @@ pub fn read_r1cs_file(path: &PathBuf) -> std::io::Result<R1CSGenerator> {
     symbol_map: HashMap::new(),
     pub_inputs,
     witnesses,
-    logger: None,
   })
 }
 
@@ -461,7 +456,7 @@ mod tests {
     let dir = tempdir()?;
     let test_file_path = dir.path().join("test.r1cs");
 
-    let mut generator = R1CSGenerator::new_without_logger();
+    let mut generator = R1CSGenerator::new();
     
     generator.pub_inputs = vec!["x".to_string(), "y".to_string()];
     generator.witnesses = vec!["w1".to_string()];
