@@ -1,5 +1,5 @@
 use crate::lexer::{Token, Keyword, Symbol};
-use crate::ast::{Expression, Type, Signal, Visibility, Pattern, Constraint, Operator, GenericParam, MatchPattern};
+use crate::ast::{Expression, Type, Signal, Visibility, Pattern, Operator, GenericParam, MatchPattern, Parameter};
 use std::iter::Peekable;
 use std::fmt;
 use tracing::debug;
@@ -37,25 +37,69 @@ impl<T: Iterator<Item = Token>> Parser<T> {
     }
   }
 
-/// Grammar: `Program ::= (Proof | Component)*`
-pub fn parse_program(&mut self) -> ParseResult<Vec<Expression>> {
+  /// Grammar: `Program ::= TopLevelDeclaration*`
+  pub fn parse_program(&mut self) -> ParseResult<Vec<Expression>> {
     let mut declarations = Vec::new();
-    while let Some(token) = self.peek() {
-      match token {
-        Token::Keyword(Keyword::Proof) => {
-          declarations.push(self.parse_proof()?);
-        }
-        Token::Keyword(Keyword::Component) => {
-          declarations.push(self.parse_component()?);
-        }
-        Token::EOF => break,
-        _ => return Err(ParseError::UnexpectedToken(token.clone())),
-      }
+    while self.peek().is_some() && self.peek() != Some(&Token::EOF) {
+        declarations.push(self.parse_toplevel_declaration()?);
     }
     Ok(declarations)
   }
-  
-  /// Grammar: `Proof ::= "proof" Identifier GenericParams? "{" ProofBody "}"`
+
+  /// Grammar: `TopLevelDeclaration ::= Proof | FunctionDefinition`
+  fn parse_toplevel_declaration(&mut self) -> ParseResult<Expression> {
+      match self.peek() {
+          Some(Token::Keyword(Keyword::Proof)) => self.parse_proof(),
+          Some(Token::Keyword(Keyword::Let)) => self.parse_function_definition(),
+          Some(other) => Err(ParseError::UnexpectedToken(other.clone())),
+          None => Err(ParseError::UnexpectedEOF),
+      }
+  }
+
+  /// Grammar: `FunctionDefinition ::= "let" Identifier Parameter* ":" Type "=" Expression`
+  /// where `Parameter ::= "(" Identifier ":" Type ")"`
+  fn parse_function_definition(&mut self) -> ParseResult<Expression> {
+      self.expect(Token::Keyword(Keyword::Let))?;
+
+      let name = match self.tokens.next() {
+          Some(Token::Identifier(name)) => name,
+          Some(token) => return Err(ParseError::UnexpectedToken(token)),
+          None => return Err(ParseError::UnexpectedEOF),
+      };
+
+      let mut params = Vec::new();
+      while let Some(&Token::Symbol(Symbol::LParen)) = self.peek() {
+          self.tokens.next();
+
+          let param_name = match self.tokens.next() {
+              Some(Token::Identifier(name)) => name,
+              Some(token) => return Err(ParseError::UnexpectedToken(token)),
+              None => return Err(ParseError::UnexpectedEOF),
+          };
+
+          self.expect(Token::Symbol(Symbol::Colon))?;
+          let param_type = self.parse_type()?;
+          self.expect(Token::Symbol(Symbol::RParen))?;
+
+          params.push(Parameter { name: param_name, typ: param_type });
+      }
+
+      self.expect(Token::Symbol(Symbol::Colon))?;
+      let return_type = self.parse_type()?;
+
+      self.expect(Token::Symbol(Symbol::Equals))?;
+
+      let body = self.parse_expression()?;
+
+      Ok(Expression::FunctionDef {
+          name,
+          params,
+          return_type,
+          body: Box::new(body),
+      })
+  }
+
+  /// Grammar: `Proof ::= "proof" Identifier GenericParams? "{" Signal* Expression "}"`
   fn parse_proof(&mut self) -> ParseResult<Expression> {
     self.expect(Token::Keyword(Keyword::Proof))?;
     
@@ -73,7 +117,17 @@ pub fn parse_program(&mut self) -> ParseResult<Vec<Expression>> {
 
     self.expect(Token::Symbol(Symbol::LBrace))?;
 
-    let (signals, constraints) = self.parse_proof_body()?;
+    let mut signals = Vec::new();
+    while let Some(Token::Keyword(kw)) = self.peek() {
+        match kw {
+            Keyword::Input | Keyword::Witness | Keyword::Output => {
+                signals.push(self.parse_signal()?);
+            }
+            _ => break,
+        }
+    }
+
+    let body = self.parse_expression()?;
 
     self.expect(Token::Symbol(Symbol::RBrace))?;
 
@@ -81,43 +135,8 @@ pub fn parse_program(&mut self) -> ParseResult<Vec<Expression>> {
       name,
       generics,
       signals,
-      constraints,
+      body: Box::new(body),
     })
-  }
-
-  /// Grammar: `ProofBody ::= (Signal | Constraint)*`
-  /// where Signal ::= ("input" | "witness" | "output") Identifier ":" Type ";"
-  /// and Constraint ::= Assert | Verify | Let | Match
-  fn parse_proof_body(&mut self) -> ParseResult<(Vec<Signal>, Vec<Constraint>)> {
-    let mut signals = Vec::new();
-    let mut constraints = Vec::new();
-
-    while let Some(token) = self.peek() {
-      match token {
-        Token::Keyword(Keyword::Input) |
-        Token::Keyword(Keyword::Witness) |
-        Token::Keyword(Keyword::Output) => {
-          signals.push(self.parse_signal()?);
-        }
-        Token::Keyword(Keyword::Assert) |
-        Token::Keyword(Keyword::Verify) => {
-          constraints.push(self.parse_constraint()?);
-        }
-        Token::Keyword(Keyword::Let) => {
-          // Handle let bindings
-          let binding = self.parse_let_binding()?;
-          constraints.push(Constraint::Let(Box::new(binding)));
-        }
-        Token::Keyword(Keyword::Match) => {
-          let match_expr = self.parse_match_expression()?;
-          constraints.push(Constraint::Match(Box::new(match_expr)));
-        }
-        Token::Symbol(Symbol::RBrace) => break,
-        _ => return Err(ParseError::UnexpectedToken(token.clone())),
-      }
-    }
-
-    Ok((signals, constraints))
   }
 
   /// Grammar: `Block ::= "{" Statement* "}"`
@@ -139,12 +158,10 @@ pub fn parse_program(&mut self) -> ParseResult<Vec<Expression>> {
 
       match token {
         Token::Keyword(Keyword::Let) => {
-          // Handle let binding
           let let_expr = self.parse_let_binding()?;
           statements.push(let_expr);
         },
         _ => {
-          // Handle regular expression
           let expr = self.parse_expression()?;
           if let Some(Token::Symbol(Symbol::Semi)) = self.peek() {
             self.tokens.next();
@@ -155,11 +172,19 @@ pub fn parse_program(&mut self) -> ParseResult<Vec<Expression>> {
     }
 
     if statements.is_empty() {
-      Ok(Expression::Block(vec![]))
+      Ok(Expression::Block {
+        statements: vec![],
+        final_expr: None,
+    })
     } else if statements.len() == 1 {
       Ok(statements.remove(0))
     } else {
-      Ok(Expression::Block(statements))
+      let mut stmts = statements;
+      let final_expr = stmts.pop().map(Box::new);
+      Ok(Expression::Block {
+          statements: stmts,
+          final_expr,
+      })
     }
   }
 
@@ -239,73 +264,51 @@ pub fn parse_program(&mut self) -> ParseResult<Vec<Expression>> {
   ///                  | "refined" "{" Type "," Expression "}"
   ///                  | Identifier ("<" ...)?`
   fn parse_type(&mut self) -> ParseResult<Type> {
-    match self.tokens.next() {
-      Some(Token::Keyword(Keyword::Field)) => {
-        if let Some(Token::Symbol(Symbol::LAngle)) = self.peek() {
-          self.tokens.next();
-          let min = self.parse_expression()?;
-          self.expect(Token::Symbol(Symbol::Range))?;
-          let max = self.parse_expression()?;
-          self.expect(Token::Symbol(Symbol::RAngle))?;
-          
-          let refinement = Expression::BinaryOp {
-            left: Box::new(Expression::BinaryOp {
-              left: Box::new(Expression::Variable("self".to_string())),
-              op: Operator::Ge,
-              right: Box::new(min.clone())
-            }),
-            op: Operator::And,
-            right: Box::new(Expression::BinaryOp {
-              left: Box::new(Expression::Variable("self".to_string())),
-              op: Operator::Lt,
-              right: Box::new(max.clone())
-            })
-          };
-          
-          Ok(Type::Refined(
-            Box::new(Type::Field),
-            Box::new(refinement)
-          ))
-        } else {
-          Ok(Type::Field)
+    let next_token = match self.peek() {
+        Some(token) => token.clone(),
+        None => return Err(ParseError::UnexpectedEOF),
+    };
+
+    match next_token {
+        Token::Identifier(name) => {
+            self.tokens.next();
+            if name == "array" {
+                self.expect(Token::Symbol(Symbol::LAngle))?;
+                let element_type = Box::new(self.parse_type()?);
+                self.expect(Token::Symbol(Symbol::Comma))?;
+                let size = match self.tokens.next() {
+                    Some(Token::Number(n)) => n as usize,
+                    Some(other) => return Err(ParseError::UnexpectedToken(other)),
+                    None => return Err(ParseError::UnexpectedEOF),
+                };
+                self.expect(Token::Symbol(Symbol::RAngle))?;
+                Ok(Type::Array { element_type, size })
+            } else {
+                Ok(Type::Identifier(name))
+            }
         }
-      }
-      Some(Token::Keyword(Keyword::Bits)) => {
-        self.expect(Token::Symbol(Symbol::LAngle))?;
-        let size = self.parse_expression()?;
-        self.expect(Token::Symbol(Symbol::RAngle))?;
-        Ok(Type::Bits(Box::new(size)))
-      }
-      Some(Token::Keyword(Keyword::Array)) => {
-        self.expect(Token::Symbol(Symbol::LAngle))?;
-        let element_type = Box::new(self.parse_type()?);
-        self.expect(Token::Symbol(Symbol::Comma))?;
-        let size = Box::new(self.parse_expression()?);
-        self.expect(Token::Symbol(Symbol::RAngle))?;
-        Ok(Type::Array(element_type, size))
-      }
+        Token::Symbol(Symbol::LParen) => {
+            self.tokens.next();
+            let mut types = Vec::new();
 
-      Some(Token::Keyword(Keyword::Nat)) => Ok(Type::Nat),
-      Some(Token::Keyword(Keyword::Bool)) => Ok(Type::Bool),
+            if self.peek() == Some(&Token::Symbol(Symbol::RParen)) {
+                self.tokens.next();
+                return Ok(Type::Tuple(types));
+            }
 
-      Some(Token::Keyword(Keyword::Refined)) => {
-        self.expect(Token::Symbol(Symbol::LBrace))?;
-        let base_type = Box::new(self.parse_type()?);
-        self.expect(Token::Symbol(Symbol::Comma))?;
-        let refinement = Box::new(self.parse_expression()?);
-        self.expect(Token::Symbol(Symbol::RBrace))?;
-        Ok(Type::Refined(base_type, refinement))
-      }
+            loop {
+                types.push(self.parse_type()?);
+                if self.peek() == Some(&Token::Symbol(Symbol::Comma)) {
+                    self.tokens.next();
+                } else {
+                    break;
+                }
+            }
 
-      Some(Token::Identifier(name)) => {
-        if self.peek() == Some(&Token::Symbol(Symbol::LAngle)) {
-          Ok(Type::GenericType(name))
-        } else {
-          Ok(Type::Custom(name))
+            self.expect(Token::Symbol(Symbol::RParen))?;
+            Ok(Type::Tuple(types))
         }
-      }
-      Some(token) => Err(ParseError::UnexpectedToken(token)),
-      None => Err(ParseError::UnexpectedEOF),
+        other => Err(ParseError::UnexpectedToken(other)),
     }
   }
 
@@ -319,7 +322,7 @@ pub fn parse_program(&mut self) -> ParseResult<Vec<Expression>> {
   }
 
   /// Grammar: `BinaryExpression ::= PrimaryExpression (Operator PrimaryExpression)*`
-  /// with operator precedence: Assert(1) < Add,Sub(2) < Mul(3)
+  /// with operator precedence: Assert(1) < Equal(2) < Add,Sub(3) < Mul(4)
   fn parse_binary_expression(&mut self) -> ParseResult<Expression> {
     let mut expr_stack = vec![self.parse_primary_expression()?];
     let mut op_stack = Vec::new();
@@ -327,29 +330,30 @@ pub fn parse_program(&mut self) -> ParseResult<Vec<Expression>> {
     while let Some(token) = self.peek() {
       let (op, precedence) = match token {
         Token::Symbol(Symbol::TripleEqual) => (Operator::Assert, 1),
-        Token::Symbol(Symbol::Plus) => (Operator::Add, 2),
-        Token::Symbol(Symbol::Star) => (Operator::Mul, 3),
-        Token::Symbol(Symbol::Minus) => (Operator::Sub, 2),
+        Token::Symbol(Symbol::Equal) => (Operator::Equal, 2),
+        Token::Symbol(Symbol::Plus) => (Operator::Add, 3),
+        Token::Symbol(Symbol::Star) => (Operator::Mul, 4),
+        Token::Symbol(Symbol::Minus) => (Operator::Sub, 3),
         _ => break,
       };
 
-      self.tokens.next(); // Consume the operator
+      self.tokens.next();
+      
       let right = self.parse_primary_expression()?;
 
-      // Process operators with higher or equal precedence
       while let Some(top_op) = op_stack.last() {
         let top_precedence = match top_op {
           Operator::Assert => 1,
-          Operator::Add => 2,
-          Operator::Mul => 3,
+          Operator::Equal => 2,
+          Operator::Add | Operator::Sub => 3,
+          Operator::Mul => 4,
           _ => 0,
         };
 
-        if top_precedence <= precedence {
+        if top_precedence < precedence {
           break;
         }
 
-        // Pop and combine
         let right_expr = expr_stack.pop().unwrap();
         let left_expr = expr_stack.pop().unwrap();
         expr_stack.push(Expression::BinaryOp {
@@ -363,7 +367,6 @@ pub fn parse_program(&mut self) -> ParseResult<Vec<Expression>> {
       expr_stack.push(right);
     }
 
-    // Process remaining operators
     while let Some(op) = op_stack.pop() {
       let right_expr = expr_stack.pop().unwrap();
       let left_expr = expr_stack.pop().unwrap();
@@ -377,49 +380,100 @@ pub fn parse_program(&mut self) -> ParseResult<Vec<Expression>> {
     Ok(expr_stack.pop().unwrap())
   }
 
-  /// Grammar: `PrimaryExpression ::= Number | FunctionCall | Variable | Match`
-  /// where FunctionCall ::= Identifier "(" (Expression ("," Expression)*)? ")"
+  /// Grammar: `PrimaryExpression ::= Number | FunctionCall | Variable | Tuple | GroupedExpr | Assert | Match`
   fn parse_primary_expression(&mut self) -> ParseResult<Expression> {
+    let next_token = match self.peek() {
+        Some(token) => token.clone(),
+        None => return Err(ParseError::UnexpectedEOF),
+    };
+
+    match next_token {
+      Token::Number(_) | Token::Identifier(_) | Token::Symbol(Symbol::LParen) => {
+        self.parse_simple_primary()
+      },
+      Token::Keyword(Keyword::Assert) => {
+        self.tokens.next();
+        let condition = self.parse_expression()?;
+        Ok(Expression::Assert(Box::new(condition)))
+      },
+      Token::Keyword(Keyword::Match) => self.parse_match_expression(),
+      _ => Err(ParseError::UnexpectedToken(next_token)),
+    }
+  }
+
+  fn parse_simple_primary(&mut self) -> ParseResult<Expression> {
     match self.tokens.next() {
       Some(Token::Number(n)) => Ok(Expression::Number(n)),
       Some(Token::Identifier(name)) => {
-        if let Some(Token::Symbol(Symbol::LParen)) = self.peek() {
-          self.tokens.next();
-          let mut args = Vec::new();
-          
-          while let Some(token) = self.peek() {
-            if token == &Token::Symbol(Symbol::RParen) {
-              self.tokens.next();
-              break;
-            }
-            
-            args.push(self.parse_expression()?);
-            
-            match self.peek() {
-              Some(Token::Symbol(Symbol::Comma)) => {
-                self.tokens.next();
-              }
-              Some(Token::Symbol(Symbol::RParen)) => continue,
-              _ => return Err(ParseError::UnexpectedToken(self.tokens.next().unwrap())),
-            }
-          }
-          
-          Ok(Expression::FunctionCall {
-            function: name,
-            arguments: args,
-          })
+        if self.peek() == Some(&Token::Symbol(Symbol::LParen)) {
+            self.parse_function_call(name)
         } else {
-          Ok(Expression::Variable(name))
+            Ok(Expression::Variable(name))
         }
       },
-      Some(Token::Keyword(Keyword::Match)) => self.parse_match_expression(),
+      Some(Token::Symbol(Symbol::LParen)) => {
+        self.parse_tuple_or_grouped_expr()
+      },
       Some(token) => Err(ParseError::UnexpectedToken(token)),
       None => Err(ParseError::UnexpectedEOF),
     }
   }
 
+  fn parse_function_call(&mut self, name: String) -> ParseResult<Expression> {
+    self.expect(Token::Symbol(Symbol::LParen))?;
+    let mut args = Vec::new();
+    
+    if self.peek() == Some(&Token::Symbol(Symbol::RParen)) {
+      self.tokens.next();
+      return Ok(Expression::FunctionCall { function: name, arguments: args });
+    }
+    
+    loop {
+      args.push(self.parse_expression()?);
+      if self.peek() == Some(&Token::Symbol(Symbol::Comma)) {
+        self.tokens.next();
+      } else {
+        break;
+      }
+    }
+    
+    self.expect(Token::Symbol(Symbol::RParen))?;
+    
+    Ok(Expression::FunctionCall {
+      function: name,
+      arguments: args,
+    })
+  }
+
+  fn parse_tuple_or_grouped_expr(&mut self) -> ParseResult<Expression> {
+    if self.peek() == Some(&Token::Symbol(Symbol::RParen)) {
+        self.tokens.next();
+        return Ok(Expression::Tuple(vec![]));
+    }
+
+    let first_expr = self.parse_expression()?;
+
+    if self.peek() == Some(&Token::Symbol(Symbol::Comma)) {
+        self.tokens.next();
+        let mut elements = vec![first_expr];
+        
+        while self.peek() != Some(&Token::Symbol(Symbol::RParen)) {
+            elements.push(self.parse_expression()?);
+            if self.peek() == Some(&Token::Symbol(Symbol::Comma)) {
+                self.tokens.next();
+            } else {
+                break;
+            }
+        }
+        self.expect(Token::Symbol(Symbol::RParen))?;
+        Ok(Expression::Tuple(elements))
+    } else {
+        self.expect(Token::Symbol(Symbol::RParen))?;
+        Ok(first_expr)
+    }
+  }
+
   /// Grammar: `Match ::= "match" Expression "{" MatchArm* "}"`
-  /// where MatchArm ::= Pattern "=>" Block ","?
   fn parse_match_expression(&mut self) -> ParseResult<Expression> {
     self.expect(Token::Keyword(Keyword::Match))?;
     let value = Box::new(self.parse_expression()?);
@@ -430,7 +484,7 @@ pub fn parse_program(&mut self) -> ParseResult<Vec<Expression>> {
     while let Some(token) = self.peek() {
       
       if token == &Token::Symbol(Symbol::RBrace) {
-        self.tokens.next();  // consume closing brace
+        self.tokens.next();
         break;
       }
       
@@ -441,7 +495,6 @@ pub fn parse_program(&mut self) -> ParseResult<Vec<Expression>> {
       
       patterns.push(MatchPattern { pattern, body });
       
-      // Handle optional comma after match arm
       if let Some(Token::Symbol(Symbol::Comma)) = self.peek() {
         self.tokens.next();
       }
@@ -450,46 +503,51 @@ pub fn parse_program(&mut self) -> ParseResult<Vec<Expression>> {
     Ok(Expression::Match { value, patterns })
   }
 
-  /// Grammar: `Pattern ::= Constructor | Variable | Wildcard`
+  /// Grammar: `Pattern ::= Constructor | Variable | Wildcard | Tuple`
   /// where Constructor ::= Identifier "(" (Pattern ("," Pattern)*)? ")"
   /// and Variable ::= Identifier
   /// and Wildcard ::= "_"
+  /// and Tuple ::= "(" (Pattern ("," Pattern)*)? ")"`
   fn parse_pattern(&mut self) -> ParseResult<Pattern> {
-    match self.tokens.next() {
+    match self.peek().cloned() {
       Some(Token::Identifier(name)) => {
+        self.tokens.next();
         if let Some(Token::Symbol(Symbol::LParen)) = self.peek() {
           self.tokens.next();
-          let mut subpatterns = Vec::new();
-          
-          while let Some(token) = self.peek() {
-            if token == &Token::Symbol(Symbol::RParen) {
-              self.tokens.next();
-              break;
-            }
-            
-            subpatterns.push(self.parse_pattern()?);
-            
-            match self.peek() {
-              Some(Token::Symbol(Symbol::Comma)) => {
-                self.tokens.next();
-              }
-              Some(Token::Symbol(Symbol::RParen)) => continue,
-              _ => return Err(ParseError::UnexpectedToken(self.tokens.next().unwrap())),
-            }
-          }
-          
+          let subpatterns = Vec::new();
           Ok(Pattern::Constructor(name, subpatterns))
         } else {
           Ok(Pattern::Variable(name))
         }
       }
-      Some(Token::Symbol(Symbol::Underscore)) => Ok(Pattern::Wildcard),
+      Some(Token::Symbol(Symbol::Underscore)) => {
+        self.tokens.next();
+        Ok(Pattern::Wildcard)
+      },
+      Some(Token::Symbol(Symbol::LParen)) => {
+        self.tokens.next();
+        let mut patterns = Vec::new();
+        if self.peek() == Some(&Token::Symbol(Symbol::RParen)) {
+            self.tokens.next();
+            return Ok(Pattern::Tuple(patterns));
+        }
+        loop {
+            patterns.push(self.parse_pattern()?);
+            if self.peek() == Some(&Token::Symbol(Symbol::Comma)) {
+                self.tokens.next();
+            } else {
+                break;
+            }
+        }
+        self.expect(Token::Symbol(Symbol::RParen))?;
+        Ok(Pattern::Tuple(patterns))
+      }
       Some(token) => Err(ParseError::UnexpectedToken(token)),
       None => Err(ParseError::UnexpectedEOF),
     }
   }
 
-  /// Grammar: `Component ::= "component" Identifier GenericParams? "{" ProofBody "}"`
+  /// Grammar: `Component ::= "component" Identifier GenericParams? "{" Signal* Expression "}"`
   fn parse_component(&mut self) -> ParseResult<Expression> {
     self.expect(Token::Keyword(Keyword::Component))?;
     
@@ -507,7 +565,17 @@ pub fn parse_program(&mut self) -> ParseResult<Vec<Expression>> {
 
     self.expect(Token::Symbol(Symbol::LBrace))?;
 
-    let (signals, constraints) = self.parse_proof_body()?;
+    let mut signals = Vec::new();
+    while let Some(Token::Keyword(kw)) = self.peek() {
+        match kw {
+            Keyword::Input | Keyword::Witness | Keyword::Output => {
+                signals.push(self.parse_signal()?);
+            }
+            _ => break,
+        }
+    }
+
+    let body = self.parse_expression()?;
 
     self.expect(Token::Symbol(Symbol::RBrace))?;
 
@@ -515,64 +583,29 @@ pub fn parse_program(&mut self) -> ParseResult<Vec<Expression>> {
       name,
       generics,
       signals,
-      constraints,
+      body: Box::new(body),
     })
   }
 
-  /// Grammar: `Let ::= "let" Identifier "=" Expression ";" Expression`
+  /// Grammar: `Let ::= "let" Pattern "=" Expression "in" Expression`
   fn parse_let_binding(&mut self) -> ParseResult<Expression> {
     self.expect(Token::Keyword(Keyword::Let))?;
     
-    let name = match self.tokens.next() {
-      Some(Token::Identifier(name)) => name,
-      Some(token) => return Err(ParseError::UnexpectedToken(token)),
-      None => return Err(ParseError::UnexpectedEOF),
-    };
+    let pattern = self.parse_pattern()?;
 
     self.expect(Token::Symbol(Symbol::Equals))?;
     
     let value = Box::new(self.parse_expression()?);
     
-    // Consume semicolon
-    self.expect(Token::Symbol(Symbol::Semi))?;
+    self.expect(Token::Keyword(Keyword::In))?;
     
-    // Parse the body (which could be another let or the final expression)
     let body = Box::new(self.parse_expression()?);
 
     Ok(Expression::Let {
-      name,
-      value,
-      body,
+        pattern,
+        value,
+        body,
     })
-  }
-
-  /// Grammar: `Constraint ::= Assert | Verify | Match | Let`
-  /// where Assert ::= "assert" Expression ";"
-  /// and Verify ::= "verify" Expression ";"
-  pub fn parse_constraint(&mut self) -> ParseResult<Constraint> {
-    match self.tokens.next() {
-      Some(Token::Keyword(Keyword::Assert)) => {
-        let expr = Box::new(self.parse_expression()?);
-        self.expect(Token::Symbol(Symbol::Semi))?;
-        Ok(Constraint::Assert(expr))
-      }
-      Some(Token::Keyword(Keyword::Verify)) => {
-        let expr = Box::new(self.parse_expression()?);
-        self.expect(Token::Symbol(Symbol::Semi))?;
-        Ok(Constraint::Verify(expr))
-      }
-      Some(Token::Keyword(Keyword::Match)) => {
-        let expr = self.parse_match_expression()?;
-        Ok(Constraint::Match(Box::new(expr)))
-      }
-      Some(Token::Keyword(Keyword::Let)) => {
-        // Add support for let bindings in constraints
-        let expr = self.parse_let_binding()?;
-        Ok(Constraint::Let(Box::new(expr)))
-      }
-      Some(token) => Err(ParseError::UnexpectedToken(token)),
-      None => Err(ParseError::UnexpectedEOF),
-    }
   }
 }
 
