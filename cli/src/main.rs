@@ -20,8 +20,15 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-  /// Type check a Lof source file and generate R1CS
   Check {
+    #[arg(value_name = "FILE")]
+    file: PathBuf,
+
+    #[arg(short, long)]
+    verbose: bool,
+  },
+  /// Compile a Lof source file and generate R1CS
+  Compile {
     #[arg(value_name = "FILE")]
     file: PathBuf,
 
@@ -64,7 +71,57 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
   let cli = Cli::parse();
 
   match cli.command {
-    Commands::Check { file, verbose, generate_templates } => {
+    Commands::Check { file, verbose } => {
+        if file.extension().and_then(|ext| ext.to_str()) != Some("lof") {
+          let err_msg = "File must have .lof extension";
+          error!("{}", err_msg);
+          return Err(err_msg.into());
+        }
+
+        info!("Type checking file: {}", file.display());
+        println!("{} {}", "Type checking".blue(), file.display());
+        let source = fs::read_to_string(&file)?;
+
+        let pipeline = CompilerPipeline::new(source, verbose);
+        
+        if verbose {
+          debug!("Starting type checking in verbose mode");
+          println!("{}", "Starting type checking...".yellow());
+        }
+
+        match pipeline.type_check_only(&file) {
+          Ok(_) => {
+            info!("Type checking completed successfully");
+            println!("{}", "Type checking successful".green());
+            Ok(())
+          }
+          Err(err) => {
+            match err {
+              CompilerError::LexerError(e) => {
+                error!("Lexer error: {}", e);
+                Err(format!("Lexer error: {}", e).into())
+              }
+              CompilerError::ParserError(e) => {
+                error!("Parser error: {}", e);
+                Err(format!("Parser error: {}", e).into())
+              }
+              CompilerError::TypeCheckerError(e) => {
+                error!("Type error: {:?}", e);
+                Err(format!("Type error: {:?}", e).into())
+              }
+              CompilerError::NoProofs => {
+                error!("No proofs found in the source file");
+                Err("No proofs found in the source file".into())
+              }
+              CompilerError::R1CSError => {
+                error!("R1CS generation failed");
+                Err("R1CS error".into())
+              }
+            }
+          }
+        }
+    }
+    Commands::Compile { file, verbose, generate_templates } => {
         if file.extension().and_then(|ext| ext.to_str()) != Some("lof") {
           let err_msg = "File must have .lof extension";
           error!("{}", err_msg);
@@ -112,10 +169,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 error!("Parser error: {}", e);
                 Err(format!("Parser error: {}", e).into())
               }
-              // CompilerError::TypeCheckerError(e) => {
-              //   error!("Type error: {:?}", e);
-              //   Err(format!("Type error: {:?}", e).into())
-              // }
+              CompilerError::TypeCheckerError(e) => {
+                error!("Type error: {:?}", e);
+                Err(format!("Type error: {:?}", e).into())
+              }
               CompilerError::NoProofs => {
                 error!("No proofs found in the source file");
                 Err("No proofs found in the source file".into())

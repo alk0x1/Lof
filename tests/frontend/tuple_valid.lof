@@ -1,0 +1,7 @@
+// SHOULD_FAIL - Simple variable reuse
+proof SimpleReuse {
+    input a: field;
+    let first = a in
+    let second = a in
+    second
+}

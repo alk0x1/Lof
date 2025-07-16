@@ -4,6 +4,7 @@ pub enum Token {
   Number(i64),
   Keyword(Keyword),
   Symbol(Symbol),
+  Comment(String),
   EOF,
 }
 
@@ -63,7 +64,7 @@ pub enum Symbol {
   Semi,           // ;
   Comma,          // ,
   Dot,            // .
-  
+
   // Operators
   Equals,         // =
   TripleEqual,    // === (constraint equality)
@@ -104,6 +105,33 @@ impl Lexer {
       column: 1,
     }
   }
+
+  fn peek_token(&mut self) -> Token {
+    let saved_position = self.position;
+    let saved_line = self.line;
+    let saved_column = self.column;
+    
+    let token = self.next_token();
+    
+    self.position = saved_position;
+    self.line = saved_line;
+    self.column = saved_column;
+    
+    token
+  }
+
+  pub fn skip_comments(&mut self) {
+    loop {
+      let token = self.peek_token();
+      match token {
+        Token::Comment(_) => {
+          self.next_token();
+        }
+        _ => break,
+      }
+    }
+  }
+
 
   pub fn next_token(&mut self) -> Token {
     self.skip_whitespace();
@@ -178,7 +206,24 @@ impl Lexer {
       '+' => self.advance_with(Token::Symbol(Symbol::Plus)),
       '-' => self.advance_with(Token::Symbol(Symbol::Minus)),
       '*' => self.advance_with(Token::Symbol(Symbol::Star)),
-      '/' => self.advance_with(Token::Symbol(Symbol::Slash)),
+      '/' => {
+        if self.peek() == Some('/') {
+          self.position += 2;
+          self.column += 2;
+          
+          let start = self.position;
+          while self.position < self.input.len() && 
+                self.input[self.position] != '\n' {
+            self.position += 1;
+            self.column += 1;
+          }
+          
+          let comment_text: String = self.input[start..self.position].iter().collect();
+          Token::Comment(comment_text)
+        } else {
+          self.advance_with(Token::Symbol(Symbol::Slash))
+        }
+      },
       '.' => {
         if self.peek() == Some('.') {
           self.position += 2;
@@ -379,7 +424,24 @@ impl Iterator for Lexer {
       '+' => self.advance_with(Token::Symbol(Symbol::Plus)),
       '-' => self.advance_with(Token::Symbol(Symbol::Minus)),
       '*' => self.advance_with(Token::Symbol(Symbol::Star)),
-      '/' => self.advance_with(Token::Symbol(Symbol::Slash)),
+      '/' => {
+        if self.peek() == Some('/') {
+          self.position += 2;
+          self.column += 2;
+          
+          let start = self.position;
+          while self.position < self.input.len() && 
+                self.input[self.position] != '\n' {
+            self.position += 1;
+            self.column += 1;
+          }
+          
+          let comment_text: String = self.input[start..self.position].iter().collect();
+          Token::Comment(comment_text)
+        } else {
+          self.advance_with(Token::Symbol(Symbol::Slash))
+        }
+      },
       '.' => {
         if self.peek() == Some('.') {
           self.position += 2;

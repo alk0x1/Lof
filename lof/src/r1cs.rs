@@ -119,7 +119,7 @@ impl R1CSGenerator {
 
   pub fn convert_proof(&mut self, expr: &Expression) -> Result<(), R1CSError> {
     match expr {
-      Expression::Proof { signals, constraints, .. } => {
+      Expression::Proof { name, generics, signals, body } => {
         for signal in signals {
           match signal.visibility {
             ast::Visibility::Input |   
@@ -132,41 +132,14 @@ impl R1CSGenerator {
           }
         }
 
-        for constraint in constraints {
-          self.convert_constraint(constraint)?;
-        }
+        // Instead of iterating over constraints, we now "execute" the body expression.
+        // The final result of the proof body is ignored; we only care about the
+        // constraints generated along the way.
+        self.convert_to_linear_combination(body)?;
 
         Ok(())
       }
       _ => Err(R1CSError::InvalidArgument("Expected proof expression".to_string()))
-    }
-  }
-
-  fn convert_constraint(&mut self, constraint: &Constraint) -> Result<(), R1CSError> {
-    match constraint {
-      Constraint::Assert(expr) | Constraint::Verify(expr) => {
-        self.convert_assertion(expr)?;
-      }
-      _ => return Err(R1CSError::UnsupportedOperation("Unsupported constraint type".to_string()))
-    }
-    Ok(())
-  }
-
-  fn convert_assertion(&mut self, expr: &Expression) -> Result<(), R1CSError> {
-    match expr {
-      Expression::BinaryOp { left, op: Operator::Assert, right } => {
-        let a = self.convert_to_linear_combination(left)?;
-        let b = self.convert_to_linear_combination(right)?;
-
-        self.constraints.push(R1CSConstraint {
-          a,
-          b: LinearCombination { terms: vec![("ONE".to_string(), 1)] },
-          c: b
-        });
-        
-        Ok(())
-      }
-      _ => Err(R1CSError::InvalidArgument("Expected assertion".to_string()))
     }
   }
 
@@ -207,6 +180,18 @@ impl R1CSGenerator {
             Ok(LinearCombination {
               terms: vec![(temp, 1)]
             })
+          }
+          Operator::Assert => {
+            let a = self.convert_to_linear_combination(left)?;
+            let b = self.convert_to_linear_combination(right)?;
+
+            self.constraints.push(R1CSConstraint {
+              a,
+              b: LinearCombination { terms: vec![("ONE".to_string(), 1)] },
+              c: b
+            });
+            
+            Ok(LinearCombination { terms: vec![] })
           }
           _ => Err(R1CSError::UnsupportedOperation(format!("Unsupported operator: {:?}", op)))
         }

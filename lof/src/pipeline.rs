@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use crate::lexer::Lexer;
 use crate::parser::Parser;
-// use crate::typechecker::{TypeChecker, TypeError};
+use crate::typechecker::{TypeChecker, TypeError};
 use crate::ast::Expression;
 use crate::r1cs::R1CSGenerator;
 use tracing::{info, warn, error, debug, instrument};
@@ -10,7 +10,7 @@ use tracing::{info, warn, error, debug, instrument};
 pub enum CompilerError {
   LexerError(String),
   ParserError(String),
-  // TypeCheckerError(TypeError),
+  TypeCheckerError(TypeError),
   R1CSError,
   NoProofs,
 }
@@ -24,6 +24,43 @@ impl CompilerPipeline {
     Self {
       source,
     }
+  }
+
+  #[instrument(skip(self, source_path))]
+  pub fn type_check_only(&self, source_path: &PathBuf) -> Result<(), CompilerError> {
+    info!("Starting type checking process");
+    
+    info!("Parsing source code");
+    let lexer = Lexer::new(&self.source);
+    let mut parser = Parser::new(lexer);
+    
+    let ast = parser.parse_program()
+      .map_err(|e| {
+        error!("Parsing failed: {}", e);
+        CompilerError::ParserError(format!("{:?}", e))
+      })?;
+        
+    if ast.is_empty() {
+      error!("No proofs found in source code");
+      return Err(CompilerError::NoProofs);
+    }
+
+    info!("Parsing completed successfully");
+
+    info!("Performing type checking...");
+    let mut type_checker = TypeChecker::new();
+    
+    type_checker.check_program(&ast).map_err(|e| {
+        error!("Type checking failed: {}", e);
+        CompilerError::TypeCheckerError(e)
+    })?;
+
+    info!("Type checking completed successfully");
+
+    let proof_count = ast.iter().filter(|e| matches!(e, Expression::Proof {..})).count();
+    info!("Type checking successful! Summary: {} proof(s) parsed and type checked", proof_count);
+
+    Ok(())
   }
 
   #[instrument(skip(self, source_path))]
@@ -49,28 +86,15 @@ impl CompilerPipeline {
     info!("Parsing completed successfully");
 
     // Step 2: Type Checking
-    // info!("Performing type checking...");
-    // let mut type_checker = TypeChecker::new();
-    let typed_proofs = Vec::new();
+    info!("Performing type checking...");
+    let mut type_checker = TypeChecker::new();
     
-    // for expr in ast.iter() {
-    //   if let Expression::Proof { name, .. } = expr {
-    //     debug!("Checking proof '{}'", name);
-        
-    //     match type_checker.check_proof(expr) {
-    //       Ok(_) => {
-    //         typed_proofs.push(expr);
-    //         debug!("Proof '{}' type-checked successfully", name);
-    //       },
-    //       Err(e) => {
-    //         error!("Type checking failed for proof '{}': {}", name, e);
-    //         // return Err(CompilerError::TypeCheckerError(e));
-    //       }
-    //     }
-    //   }
-    // }
+    type_checker.check_program(&ast).map_err(|e| {
+        error!("Type checking failed: {}", e);
+        CompilerError::TypeCheckerError(e)
+    })?;
 
-    // info!("Type checking completed successfully");
+    info!("Type checking completed successfully");
 
     // Step 3: R1CS Generation
     info!("Generating R1CS constraints...");
@@ -80,7 +104,7 @@ impl CompilerPipeline {
         .and_then(|s| s.to_str())
         .unwrap_or("output");
     
-    for proof in &typed_proofs {
+    for proof in &ast {
       if let Expression::Proof { name, .. } = proof {
         debug!("Converting proof '{}' to R1CS", name);
         
@@ -136,9 +160,10 @@ impl CompilerPipeline {
     }
 
     // Final compilation summary
+    let proof_count = ast.iter().filter(|e| matches!(e, Expression::Proof {..})).count();
     info!(
       "Compilation successful! Summary: {} proof(s) parsed, {} R1CS constraint(s) generated",
-      typed_proofs.len(),
+      proof_count,
       r1cs_generator.constraints.len()
     );
 

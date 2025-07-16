@@ -26,6 +26,9 @@ impl<T: Iterator<Item = Token>> Parser<T> {
   }
 
   fn peek(&mut self) -> Option<&Token> {
+    while matches!(self.tokens.peek(), Some(Token::Comment(_))) {
+        self.tokens.next();
+    }
     self.tokens.peek()
   }
 

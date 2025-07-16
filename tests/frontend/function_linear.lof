@@ -1,0 +1,8 @@
+// SHOULD_PASS - Function with linear parameters
+let square(x: field): field = x * x
+
+proof FunctionLinear {
+    input a: field;
+    let result = square(a) in
+    result
+}

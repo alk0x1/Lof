@@ -3,14 +3,14 @@ use std::fmt;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
     // Core types
-    Field,
+    Field(LinearityKind),
     Bits(Box<Expression>),
     Array {
-        element_type: Box<Type>,
-        size: usize,
+      element_type: Box<Type>,
+      size: usize,
     },
     Nat,
-    Bool,
+    Bool(LinearityKind),
     
     // Type abstractions
     Custom(String),
@@ -23,14 +23,25 @@ pub enum Type {
     Tuple(Vec<Type>),
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum LinearityKind {
+    Linear,
+    Copyable,  
+    Consumed,
+}
+
 impl fmt::Display for Type {
   fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
     match self {
-      Type::Field => write!(f, "Field"),
+      Type::Field(LinearityKind::Linear) => write!(f, "field^linear"),
+      Type::Field(LinearityKind::Copyable) => write!(f, "field^copyable"),
+      Type::Field(LinearityKind::Consumed) => write!(f, "field^consumed"),
       Type::Bits(size) => write!(f, "Bits<{:?}>", size),
       Type::Array { element_type, size } => write!(f, "Array<{}, {}>", element_type, size),
       Type::Nat => write!(f, "Nat"),
-      Type::Bool => write!(f, "Bool"),
+      Type::Bool(LinearityKind::Linear) => write!(f, "Bool^linear"),
+      Type::Bool(LinearityKind::Copyable) => write!(f, "Bool^copyable"),
+      Type::Bool(LinearityKind::Consumed) => write!(f, "Bool^consumed"),
       Type::Custom(name) => write!(f, "{}", name),
       Type::GenericType(name) => write!(f, "{}", name),
       Type::Unit => write!(f, "()"),
@@ -136,20 +147,26 @@ pub enum Constraint {
 
 #[derive(Debug, Clone, PartialEq, Copy)]
 pub enum Operator {
+    // Arithmetic
     Add,
     Sub, 
     Mul,
-    Assert,
-    Equal,
-    
-    Gt,      // >
-    Lt,      // <
-    Ge,      // >=
-    Le,      // <=
-    Eq,      // ==
-    Ne,      // !=
-    And,     // &&
-    Or,      // ||
+    Div,
+
+    // Comparison
+    Equal,    // ==
+    NotEqual, // !=
+    Gt,       // >
+    Lt,       // <
+    Ge,       // >=
+    Le,       // <=
+
+    // Logical
+    And,      // &&
+    Or,       // ||
+
+    // Constraint
+    Assert,   // ===
 }
 
 #[derive(Debug, Clone, PartialEq)]
