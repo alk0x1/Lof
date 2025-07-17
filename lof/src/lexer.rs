@@ -40,7 +40,10 @@ pub enum Keyword {
   Let,            // let binding
   In,             // in keyword
   // Refined type
-  Refined         // No comma after the last item
+  Refined,         // No comma after the last item
+  
+  // Built-in functions
+  Dup,          // duplicate keyword for linearity
 }
 
 #[derive(Debug, Clone, PartialEq, Copy)]
@@ -280,7 +283,7 @@ impl Lexer {
       "where" => Token::Keyword(Keyword::Where),
       "let" => Token::Keyword(Keyword::Let),
       "in" => Token::Keyword(Keyword::In),
-      
+      "dup" => Token::Keyword(Keyword::Dup),
       "refined" => Token::Keyword(Keyword::Refined),
       "Refined" => Token::Keyword(Keyword::Refined),
       

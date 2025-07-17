@@ -392,61 +392,82 @@ impl<T: Iterator<Item = Token>> Parser<T> {
 
     match next_token {
       Token::Number(_) | Token::Identifier(_) | Token::Symbol(Symbol::LParen) => {
-        self.parse_simple_primary()
+          self.parse_simple_primary()
       },
       Token::Keyword(Keyword::Assert) => {
-        self.tokens.next();
-        let condition = self.parse_expression()?;
-        Ok(Expression::Assert(Box::new(condition)))
+          self.tokens.next();
+          let condition = self.parse_expression()?;
+          Ok(Expression::Assert(Box::new(condition)))
+      },
+      Token::Keyword(Keyword::Dup) => {
+          self.tokens.next();
+          self.expect(Token::Symbol(Symbol::LParen))?;
+          let expr = self.parse_expression()?;
+          self.expect(Token::Symbol(Symbol::RParen))?;
+          Ok(Expression::Dup(Box::new(expr)))
       },
       Token::Keyword(Keyword::Match) => self.parse_match_expression(),
       _ => Err(ParseError::UnexpectedToken(next_token)),
-    }
+  }
+
   }
 
   fn parse_simple_primary(&mut self) -> ParseResult<Expression> {
     match self.tokens.next() {
-      Some(Token::Number(n)) => Ok(Expression::Number(n)),
-      Some(Token::Identifier(name)) => {
-        if self.peek() == Some(&Token::Symbol(Symbol::LParen)) {
-            self.parse_function_call(name)
-        } else {
-            Ok(Expression::Variable(name))
-        }
-      },
-      Some(Token::Symbol(Symbol::LParen)) => {
-        self.parse_tuple_or_grouped_expr()
-      },
-      Some(token) => Err(ParseError::UnexpectedToken(token)),
-      None => Err(ParseError::UnexpectedEOF),
+        Some(Token::Number(n)) => Ok(Expression::Number(n)),
+        Some(Token::Identifier(name)) => {
+            let mut expr = Expression::Variable(name.clone());
+            let mut arguments = Vec::new();  // Accumulate all arguments
+            
+            while self.peek() == Some(&Token::Symbol(Symbol::LParen)) {
+                self.tokens.next();
+                
+                let arg = self.parse_expression()?;
+                arguments.push(arg);
+                
+                self.expect(Token::Symbol(Symbol::RParen))?;
+            }
+            
+            // If we have arguments, create a single function call with all of them
+            if !arguments.is_empty() {
+                expr = Expression::FunctionCall {
+                    function: name.clone(),
+                    arguments,
+                };
+            }
+            
+            Ok(expr)
+        },
+        Some(Token::Symbol(Symbol::LParen)) => {
+            self.parse_tuple_or_grouped_expr()
+        },
+        Some(token) => Err(ParseError::UnexpectedToken(token)),
+        None => Err(ParseError::UnexpectedEOF),
     }
-  }
-
+}
   fn parse_function_call(&mut self, name: String) -> ParseResult<Expression> {
-    self.expect(Token::Symbol(Symbol::LParen))?;
-    let mut args = Vec::new();
+    let mut expr = Expression::Variable(name);
     
-    if self.peek() == Some(&Token::Symbol(Symbol::RParen)) {
-      self.tokens.next();
-      return Ok(Expression::FunctionCall { function: name, arguments: args });
+    // Handle multiple consecutive parentheses: func(arg1)(arg2)(arg3)
+    while self.peek() == Some(&Token::Symbol(Symbol::LParen)) {
+        self.expect(Token::Symbol(Symbol::LParen))?;
+        
+        let arg = self.parse_expression()?;
+        
+        self.expect(Token::Symbol(Symbol::RParen))?;
+        
+        expr = Expression::FunctionCall {
+            function: if let Expression::Variable(ref name) = expr {
+                name.clone()
+            } else {
+                return Err(ParseError::InvalidExpression);
+            },
+            arguments: vec![arg],
+        };
     }
     
-    loop {
-      args.push(self.parse_expression()?);
-      if self.peek() == Some(&Token::Symbol(Symbol::Comma)) {
-        self.tokens.next();
-      } else {
-        break;
-      }
-    }
-    
-    self.expect(Token::Symbol(Symbol::RParen))?;
-    
-    Ok(Expression::FunctionCall {
-      function: name,
-      arguments: args,
-    })
-  }
+    Ok(expr)
+}
 
   fn parse_tuple_or_grouped_expr(&mut self) -> ParseResult<Expression> {
     if self.peek() == Some(&Token::Symbol(Symbol::RParen)) {

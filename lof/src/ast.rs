@@ -17,7 +17,12 @@ pub enum Type {
     GenericType(String),
     
     Unit,
-    
+  
+    Function {
+      params: Vec<Type>,
+      return_type: Box<Type>,
+    },
+
     Refined(Box<Type>, Box<Expression>),
     Identifier(String),
     Tuple(Vec<Type>),
@@ -45,6 +50,10 @@ impl fmt::Display for Type {
       Type::Custom(name) => write!(f, "{}", name),
       Type::GenericType(name) => write!(f, "{}", name),
       Type::Unit => write!(f, "()"),
+      Type::Function { params, return_type } => {
+        let params_str = params.iter().map(|t| format!("{}", t)).collect::<Vec<_>>().join(", ");
+        write!(f, "Function<({}), {}>", params_str, return_type)
+      }
       Type::Refined(base, expr) => write!(f, "Refined<{}, {:?}>", base, expr),
       Type::Identifier(name) => write!(f, "{}", name),
       Type::Tuple(types) => {
@@ -101,6 +110,7 @@ pub enum Expression {
     },
     Tuple(Vec<Expression>),
     Assert(Box<Expression>),
+    Dup(Box<Expression>)
 }
 
 #[derive(Debug, Clone, PartialEq)]
