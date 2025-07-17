@@ -1,0 +1,9 @@
+// SHOULD_FAIL - Boolean variable reuse
+proof BooleanInvalid {
+    input a: field;
+    input b: field;
+    let comparison = a === b in
+    let negated = comparison === false in
+    let reused = comparison === true in
+    reused
+}

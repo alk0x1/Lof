@@ -139,6 +139,7 @@ pub enum Pattern {
   Tuple(Vec<Pattern>),
   Wildcard,
   Constructor(String, Vec<Pattern>),
+  Literal(i64)
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -1,5 +1,5 @@
-use crate::ast::{self, Expression, Operator, Pattern, Type, LinearityKind};
-use std::collections::HashMap;
+use crate::ast::{Expression, Operator, Pattern, Type, LinearityKind};
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 pub struct TypeChecker {
@@ -21,7 +21,10 @@ pub enum TypeError {
         first_use_line: Option<usize>,
         second_use_line: Option<usize> 
     },
-    InvalidDup(Type)
+    InvalidDup(Type),
+    EmptyMatchExpression,
+    DuplicatePatternVariable(String),
+    InvalidExpression
 }
 
 impl fmt::Display for TypeError {
@@ -35,6 +38,9 @@ impl fmt::Display for TypeError {
             TypeError::TypeMismatch { expected, found } => {
                 write!(f, "Type mismatch: expected {}, found {}", expected, found)
             }
+            TypeError::EmptyMatchExpression => write!(f, "Match expression must have at least one pattern"),
+            TypeError::DuplicatePatternVariable(name) => write!(f, "Variable '{}' is bound multiple times in the same pattern", name),
+            TypeError::InvalidExpression => write!(f, "Invalid expression"),
             TypeError::ArgumentCountMismatch { expected, found } => {
                 write!(
                     f,
@@ -82,6 +88,51 @@ impl TypeChecker {
                 Err(TypeError::VariableAlreadyConsumed(name.to_string()))
             }
             _ => Ok(var_type)
+        }
+    }
+
+    fn check_pattern_compatibility(&self, pattern: &Pattern, typ: &Type) -> Result<(), TypeError> {
+        match (pattern, typ) {
+            (Pattern::Variable(_), _) | (Pattern::Wildcard, _) => Ok(()),
+            (Pattern::Literal(_), Type::Field(_)) => Ok(()),
+            (Pattern::Tuple(patterns), Type::Tuple(types)) => {
+                if patterns.len() != types.len() {
+                    return Err(TypeError::PatternMismatch { expected: typ.clone(), found: pattern.clone() });
+                }
+                for (p, t) in patterns.iter().zip(types.iter()) {
+                    self.check_pattern_compatibility(p, t)?;
+                }
+                Ok(())
+            }
+            _ => Err(TypeError::PatternMismatch { expected: typ.clone(), found: pattern.clone() }),
+        }
+    }
+    
+    fn check_pattern_duplicates(&self, pattern: &Pattern, bound_vars: &mut HashSet<String>) -> Result<(), TypeError> {
+        match pattern {
+            Pattern::Variable(name) => {
+                if bound_vars.contains(name) {
+                    return Err(TypeError::DuplicatePatternVariable(name.clone()));
+                }
+                bound_vars.insert(name.clone());
+                Ok(())
+            }
+            Pattern::Tuple(patterns) => {
+                for pat in patterns {
+                    self.check_pattern_duplicates(pat, bound_vars)?;
+                }
+                Ok(())
+            }
+            Pattern::Wildcard | Pattern::Literal(_) => Ok(()),
+            _ => Ok(()),
+        }
+    }
+    
+    fn types_compatible(&self, type1: &Type, type2: &Type) -> bool {
+        match (type1, type2) {
+            (Type::Field(_), Type::Field(_)) => true,
+            (Type::Bool(_), Type::Bool(_)) => true,
+            _ => type1 == type2,
         }
     }
     
@@ -370,6 +421,42 @@ impl TypeChecker {
                 self.symbols = original_symbols;
                 Ok(result_type)
             }
+            Expression::Match { value, patterns } => {
+                if patterns.is_empty() {
+                    return Err(TypeError::EmptyMatchExpression);
+                }
+                
+                let scrutinee_type = self.check_expression(value)?;
+                self.consume_variables_in_expression(value)?;
+                
+                let mut arm_types = Vec::new();
+                
+                for pattern_arm in patterns {
+                    let original_symbols = self.symbols.clone();
+                    
+                    self.check_pattern_compatibility(&pattern_arm.pattern, &scrutinee_type)?;
+                    self.bind_pattern(&pattern_arm.pattern, &scrutinee_type)?;
+                    
+                    let arm_type = self.check_expression(&pattern_arm.body)?;
+                    arm_types.push(arm_type);
+                    
+                    self.symbols = original_symbols;
+                }
+                
+                if let Some(first_type) = arm_types.first() {
+                    for arm_type in arm_types.iter().skip(1) {
+                        if !self.types_compatible(&first_type, arm_type) {
+                            return Err(TypeError::TypeMismatch {
+                                expected: first_type.clone(),
+                                found: arm_type.clone(),
+                            });
+                        }
+                    }
+                    Ok(first_type.clone())
+                } else {
+                    Err(TypeError::EmptyMatchExpression)
+                }
+            }
             _ => todo!("Type checking for this expression is not yet implemented: {:?}", expr),
         }
     }
@@ -394,16 +481,16 @@ impl TypeChecker {
     }
 
     fn bind_pattern(&mut self, pattern: &Pattern, typ: &Type) -> Result<(), TypeError> {
+        let mut bound_vars = HashSet::new();
+        self.check_pattern_duplicates(pattern, &mut bound_vars)?;
+        
         match (pattern, typ) {
             (Pattern::Variable(name), _) => {
                 self.symbols.insert(name.clone(), typ.clone());
                 Ok(())
             }
-            (Pattern::Wildcard, _) => Ok(()),
+            (Pattern::Wildcard, _) | (Pattern::Literal(_), _) => Ok(()),
             (Pattern::Tuple(patterns), Type::Tuple(types)) => {
-                if patterns.len() != types.len() {
-                    return Err(TypeError::PatternMismatch { expected: typ.clone(), found: pattern.clone() });
-                }
                 for (p, t) in patterns.iter().zip(types.iter()) {
                     self.bind_pattern(p, t)?;
                 }

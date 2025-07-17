@@ -502,30 +502,50 @@ impl<T: Iterator<Item = Token>> Parser<T> {
     self.expect(Token::Keyword(Keyword::Match))?;
     let value = Box::new(self.parse_expression()?);
     
-    self.expect(Token::Symbol(Symbol::LBrace))?;
+    self.expect(Token::Keyword(Keyword::With))?;  // Changed from LBrace
     
     let mut patterns = Vec::new();
-    while let Some(token) = self.peek() {
-      
-      if token == &Token::Symbol(Symbol::RBrace) {
+    
+    if let Some(Token::Symbol(Symbol::Pipe)) = self.peek() {
         self.tokens.next();
-        break;
-      }
-      
-      let pattern = self.parse_pattern()?;
-      self.expect(Token::Symbol(Symbol::FatArrow))?;
-      
-      let body = Box::new(self.parse_block()?);
-      
-      patterns.push(MatchPattern { pattern, body });
-      
-      if let Some(Token::Symbol(Symbol::Comma)) = self.peek() {
-        self.tokens.next();
-      }
+    }
+    
+    // Parse patterns until we see something that's not a pattern start
+    while self.is_pattern_start() {
+        let pattern = self.parse_pattern()?;
+        self.expect(Token::Symbol(Symbol::FatArrow))?;
+        
+        let body = Box::new(self.parse_expression()?);
+        
+        patterns.push(MatchPattern { pattern, body });
+        
+        if let Some(Token::Symbol(Symbol::Pipe)) = self.peek() {
+            self.tokens.next();
+            continue;
+        } else {
+            if self.is_pattern_start() {
+                continue;
+            } else {
+                break;
+            }
+        }
+    }
+    
+    if patterns.is_empty() {
+        return Err(ParseError::InvalidExpression);
     }
     
     Ok(Expression::Match { value, patterns })
   }
+
+  fn is_pattern_start(&mut self) -> bool {
+    matches!(self.peek(), 
+        Some(Token::Number(_)) | 
+        Some(Token::Identifier(_)) | 
+        Some(Token::Symbol(Symbol::Underscore)) | 
+        Some(Token::Symbol(Symbol::LParen))
+    )
+}
 
   /// Grammar: `Pattern ::= Constructor | Variable | Wildcard | Tuple`
   /// where Constructor ::= Identifier "(" (Pattern ("," Pattern)*)? ")"
@@ -534,40 +554,58 @@ impl<T: Iterator<Item = Token>> Parser<T> {
   /// and Tuple ::= "(" (Pattern ("," Pattern)*)? ")"`
   fn parse_pattern(&mut self) -> ParseResult<Pattern> {
     match self.peek().cloned() {
-      Some(Token::Identifier(name)) => {
-        self.tokens.next();
-        if let Some(Token::Symbol(Symbol::LParen)) = self.peek() {
-          self.tokens.next();
-          let subpatterns = Vec::new();
-          Ok(Pattern::Constructor(name, subpatterns))
-        } else {
-          Ok(Pattern::Variable(name))
-        }
-      }
-      Some(Token::Symbol(Symbol::Underscore)) => {
-        self.tokens.next();
-        Ok(Pattern::Wildcard)
-      },
-      Some(Token::Symbol(Symbol::LParen)) => {
-        self.tokens.next();
-        let mut patterns = Vec::new();
-        if self.peek() == Some(&Token::Symbol(Symbol::RParen)) {
+        Some(Token::Number(n)) => {
             self.tokens.next();
-            return Ok(Pattern::Tuple(patterns));
+            Ok(Pattern::Literal(n))
         }
-        loop {
-            patterns.push(self.parse_pattern()?);
-            if self.peek() == Some(&Token::Symbol(Symbol::Comma)) {
+        Some(Token::Identifier(name)) => {
+            self.tokens.next();
+            if let Some(Token::Symbol(Symbol::LParen)) = self.peek() {
                 self.tokens.next();
+                let mut subpatterns = Vec::new();
+                
+                // Parse constructor arguments
+                if self.peek() != Some(&Token::Symbol(Symbol::RParen)) {
+                    loop {
+                        subpatterns.push(self.parse_pattern()?);
+                        if self.peek() == Some(&Token::Symbol(Symbol::Comma)) {
+                            self.tokens.next();
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                
+                self.expect(Token::Symbol(Symbol::RParen))?;
+                Ok(Pattern::Constructor(name, subpatterns))
             } else {
-                break;
+                Ok(Pattern::Variable(name))
             }
         }
-        self.expect(Token::Symbol(Symbol::RParen))?;
-        Ok(Pattern::Tuple(patterns))
-      }
-      Some(token) => Err(ParseError::UnexpectedToken(token)),
-      None => Err(ParseError::UnexpectedEOF),
+        Some(Token::Symbol(Symbol::Underscore)) => {
+            self.tokens.next();
+            Ok(Pattern::Wildcard)
+        }
+        Some(Token::Symbol(Symbol::LParen)) => {
+            self.tokens.next();
+            let mut patterns = Vec::new();
+            if self.peek() == Some(&Token::Symbol(Symbol::RParen)) {
+                self.tokens.next();
+                return Ok(Pattern::Tuple(patterns));
+            }
+            loop {
+                patterns.push(self.parse_pattern()?);
+                if self.peek() == Some(&Token::Symbol(Symbol::Comma)) {
+                    self.tokens.next();
+                } else {
+                    break;
+                }
+            }
+            self.expect(Token::Symbol(Symbol::RParen))?;
+            Ok(Pattern::Tuple(patterns))
+        }
+        Some(token) => Err(ParseError::UnexpectedToken(token)),
+        None => Err(ParseError::UnexpectedEOF),
     }
   }
 

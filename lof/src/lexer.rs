@@ -23,6 +23,9 @@ pub enum Keyword {
   Witness,        // private witness
   Output,         // public output
   
+
+  With,           // with keyword for match expressions
+
   // Types
   Field,          // field element
   Bits,          // bit array
@@ -278,6 +281,7 @@ impl Lexer {
       "Nat" => Token::Keyword(Keyword::Nat),
       "Bool" => Token::Keyword(Keyword::Bool),
       "match" => Token::Keyword(Keyword::Match),
+      "with" => Token::Keyword(Keyword::With),
       "assert" => Token::Keyword(Keyword::Assert),
       "verify" => Token::Keyword(Keyword::Verify),
       "where" => Token::Keyword(Keyword::Where),
