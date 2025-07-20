@@ -10,8 +10,11 @@ use serde_json::{json, to_string_pretty};
 use tracing::{info, warn, error, debug};
 use tracing_subscriber;
 
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 #[derive(Parser)]
 #[command(name = "lof")]
+#[command(version = VERSION)]
 #[command(about = "Lof language compiler for ZK circuit verification", long_about = None)]
 struct Cli {
   #[command(subcommand)]
@@ -51,6 +54,7 @@ enum Commands {
     #[arg(short, long)]
     pretty: bool,
   },
+  Version,
 }
 
 fn main() {
@@ -71,6 +75,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
   let cli = Cli::parse();
 
   match cli.command {
+    Commands::Version => {
+      println!("{}", VERSION);
+      Ok(())
+    }
     Commands::Check { file, verbose } => {
         if file.extension().and_then(|ext| ext.to_str()) != Some("lof") {
           let err_msg = "File must have .lof extension";
@@ -229,6 +237,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
   }
 }
+
+
 
 fn generate_json_templates(
   proof_name: &str,

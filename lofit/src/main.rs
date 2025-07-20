@@ -7,8 +7,11 @@ use std::fs::File;
 use std::io::{BufReader, BufWriter};
 use lofit::generate_full_witness;
 
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 #[derive(Parser)]
 #[command(name = "lofit")]
+#[command(version = VERSION)]
 #[command(about = "Lof ZK Toolkit - Handles proving and verification for Lof circuits")]
 struct Cli {
   #[command(subcommand)]
@@ -17,6 +20,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+  /// Setup ceremony - generate proving and verification keys
   Setup {
     #[arg(short, long)]
     input: PathBuf,
@@ -25,6 +29,7 @@ enum Commands {
     #[arg(short = 'v', long)]
     verification_key: PathBuf,
   },
+  /// Generate a proof for the given circuit and inputs
   Prove {
     #[arg(short, long)]
     input: PathBuf,
@@ -37,6 +42,7 @@ enum Commands {
     #[arg(short, long)]
     output: PathBuf,
   },
+  /// Verify a proof against public inputs
   Verify {
     #[arg(short, long)]
     verification_key: PathBuf,
@@ -45,7 +51,9 @@ enum Commands {
     #[arg(short = 'u', long = "public-inputs")]
     public_inputs: PathBuf,
   },
+  Version,
 }
+
 #[derive(Serialize, Deserialize)]
 struct InputsJson {
   inputs: Vec<String>
@@ -60,6 +68,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   let cli = Cli::parse();
 
   match cli.command {
+    Commands::Version => {
+      println!("{}", VERSION);
+      Ok(())
+    }
     Commands::Setup { input, proving_key, verification_key } => {
       println!("Reading R1CS from {:?}", input);
       let r1cs_file = File::open(input)?;
@@ -81,6 +93,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
       println!("Writing verification key to {:?}", verification_key);
       let vk_writer = BufWriter::new(File::create(verification_key)?);
       vk.write(vk_writer)?;
+      
+      Ok(())
     }
     Commands::Prove { input, proving_key, public_inputs, witness, output } => {
       println!("Reading R1CS...");
@@ -156,6 +170,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
       println!("Writing proof to {:?}", output);
       let proof_writer = BufWriter::new(File::create(output)?);
       proof.write(proof_writer)?;
+      
+      Ok(())
     },
     Commands::Verify { verification_key, proof, public_inputs } => {
       println!("Reading verification key from {:?}...", verification_key);
@@ -181,8 +197,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Ok(false) => println!("Proof is invalid!"),
         Err(e) => println!("Verification error: {:?}", e),
       }
+      
+      Ok(())
     }
   }
-
-  Ok(())
 }
