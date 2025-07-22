@@ -30,7 +30,7 @@ enum Commands {
     #[arg(short, long)]
     verbose: bool,
   },
-  /// Compile a Lof source file and generate R1CS
+  /// Compile a Lof source file and generate R1CS with organized output
   Compile {
     #[arg(value_name = "FILE")]
     file: PathBuf,
@@ -136,6 +136,21 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
           return Err(err_msg.into());
         }
 
+        let base_name = file.file_stem().unwrap().to_str().unwrap();
+        let file_dir = file.parent().unwrap_or_else(|| std::path::Path::new("."));
+
+        // Create directories relative to the .lof file location
+        let build_dir = file_dir.join("build");
+        let keys_dir = file_dir.join("keys");
+        let inputs_dir = file_dir.join("inputs");
+        let proofs_dir = file_dir.join("proofs");
+        
+        fs::create_dir_all(&build_dir)?;
+        fs::create_dir_all(&keys_dir)?;
+        fs::create_dir_all(&inputs_dir)?;
+        fs::create_dir_all(&proofs_dir)?;
+        println!("{}", "Created project directories: build/, keys/, inputs/, proofs/".cyan());
+
         info!("Processing file: {}", file.display());
         println!("{} {}", "Processing".blue(), file.display());
         let source = fs::read_to_string(&file)?;
@@ -152,17 +167,27 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             info!("Compilation completed successfully");
             println!("{}", "Compilation successful".green());
             
-            if generate_templates {
-              let base_name = file.file_stem().unwrap().to_str().unwrap();
-              let r1cs_file = file.with_file_name(format!("{}.r1cs", base_name));
+            // Check that R1CS was generated (should be next to .lof file)
+            let r1cs_file = file.with_extension("r1cs");
+            
+            if r1cs_file.exists() {
+              // Move R1CS to build directory
+              let build_r1cs = build_dir.join(format!("{}.r1cs", base_name));
+              fs::rename(&r1cs_file, &build_r1cs)?;
+              println!("{} {}", "Generated R1CS:".green(), build_r1cs.display());
               
-              if r1cs_file.exists() {
+              if generate_templates {
                 info!("Generating JSON templates for proof: {}", base_name);
-                generate_json_templates(base_name, &vec!["x".to_string()], &vec!["y".to_string()])?;
-              } else {
-                warn!("R1CS file not found at {}, skipping template generation", r1cs_file.display());
-                println!("{} {}", "Warning:".yellow(), "R1CS file not found, skipping template generation");
+                
+                // Generate templates directly in inputs/ directory
+                generate_json_templates(&file_dir, base_name, &vec!["x".to_string()], &vec!["y".to_string()])?;
+                
+                // Print next steps
+                print_next_steps(&file_dir, base_name)?;
               }
+            } else {
+              warn!("R1CS file not found, compilation may have failed");
+              println!("{} {}", "Warning:".yellow(), "R1CS file not generated");
             }
             
             Ok(())
@@ -238,9 +263,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
   }
 }
 
-
-
 fn generate_json_templates(
+  base_dir: &std::path::Path,
   proof_name: &str,
   public_inputs: &[String],
   witnesses: &[String]
@@ -256,11 +280,12 @@ fn generate_json_templates(
     "inputs": public_values
   });
   
-  let public_file = format!("{}_public.json", proof_name);
+  // Generate directly in inputs directory (no duplication)
+  let public_file = base_dir.join("inputs").join(format!("{}_public.json", proof_name));
   let mut file = fs::File::create(&public_file)?;
   file.write_all(to_string_pretty(&public_json)?.as_bytes())?;
-  info!("Generated public inputs template: {}", public_file);
-  println!("{} {}", "Generated public inputs template:".green(), public_file);
+  info!("Generated public inputs template: {}", public_file.display());
+  println!("{} {}", "Generated public inputs template:".green(), public_file.display());
 
   let witness_values = witnesses.iter()
     .map(|_| "0".to_string())
@@ -270,21 +295,41 @@ fn generate_json_templates(
     "inputs": witness_values
   });
   
-  let witness_file = format!("{}_witness.json", proof_name);
+  let witness_file = base_dir.join("inputs").join(format!("{}_witness.json", proof_name));
   let mut file = fs::File::create(&witness_file)?;
   file.write_all(to_string_pretty(&witness_json)?.as_bytes())?;
-  info!("Generated witness template: {}", witness_file);
-  println!("{} {}", "Generated witness template:".green(), witness_file);
+  info!("Generated witness template: {}", witness_file.display());
+  println!("{} {}", "Generated witness template:".green(), witness_file.display());
 
-  info!("Template generation completed successfully");
-  println!("\nTo use these templates:");
-  println!("1. Edit {} with your public input values", public_file);
-  println!("2. Edit {} with your witness values", witness_file);
-  println!("3. Run the following commands:");
-  println!("   lofit setup --input {}.r1cs --proving-key pk.bin --verification-key vk.bin", proof_name);
-  println!("   lofit prove --input {}.r1cs --proving-key pk.bin --public-inputs {} --witness {} --output proof.bin", 
-           proof_name, public_file, witness_file);
-  println!("   lofit verify --verification-key vk.bin --proof proof.bin --public-inputs {}", public_file);
+  Ok(())
+}
 
+fn print_next_steps(base_dir: &std::path::Path, proof_name: &str) -> Result<(), Box<dyn std::error::Error>> {
+  println!("\n{}", "🚀 Next steps:".bold().green());
+  
+  let build_r1cs = base_dir.join("build").join(format!("{}.r1cs", proof_name));
+  let keys_pk = base_dir.join("keys").join(format!("{}_pk.bin", proof_name));
+  let keys_vk = base_dir.join("keys").join(format!("{}_vk.bin", proof_name));
+  let inputs_public = base_dir.join("inputs").join(format!("{}_public.json", proof_name));
+  let inputs_witness = base_dir.join("inputs").join(format!("{}_witness.json", proof_name));
+  let proofs_proof = base_dir.join("proofs").join(format!("{}_proof.bin", proof_name));
+  
+  println!("1. Generate keys:");
+  println!("   {}", format!("lofit setup --input {} --proving-key {} --verification-key {}", 
+           build_r1cs.display(), keys_pk.display(), keys_vk.display()).cyan());
+  
+  println!("\n2. Edit your input files:");
+  println!("   {} - Edit with your public input values", inputs_public.display().to_string().yellow());
+  println!("   {} - Edit with your witness values", inputs_witness.display().to_string().yellow());
+  
+  println!("\n3. Generate proof:");
+  println!("   {}", format!("lofit prove --input {} --proving-key {} --public-inputs {} --witness {} --output {}", 
+           build_r1cs.display(), keys_pk.display(), inputs_public.display(), inputs_witness.display(), proofs_proof.display()).cyan());
+  
+  println!("\n4. Verify proof:");
+  println!("   {}", format!("lofit verify --verification-key {} --proof {} --public-inputs {}", 
+           keys_vk.display(), proofs_proof.display(), inputs_public.display()).cyan());
+
+  println!("\n{}", "💡 Tip: Copy and paste these commands directly!".bright_blue());
   Ok(())
 }
