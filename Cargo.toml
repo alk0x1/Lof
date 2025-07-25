@@ -2,5 +2,5 @@
 members = [
     "lof",
     "cli", 
-    "lofit"]
+    "lofit", "lof-codegen"]
 resolver = "2"

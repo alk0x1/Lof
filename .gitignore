@@ -1,1 +1,5 @@
 target
+user_test
+examples
+features
+*.lock
