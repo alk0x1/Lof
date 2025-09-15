@@ -338,8 +338,7 @@ impl TypeChecker {
             }
             Expression::Assert(condition) => {
                 let cond_type = self.check_expression(condition)?;
-                self.consume_variables_in_expression(condition)?;
-                if cond_type != Type::Bool(LinearityKind::Linear) {
+                if cond_type != Type::Bool(LinearityKind::Linear) && cond_type != Type::Bool(LinearityKind::Copyable) {
                     return Err(TypeError::NonBooleanInAssert(cond_type));
                 }
                 Ok(Type::Unit)
@@ -418,7 +417,27 @@ impl TypeChecker {
                 } else {
                     Type::Unit
                 };
+                
+                // Preserve consumed variable states while restoring variable bindings
+                let final_symbols = self.symbols.clone();
                 self.symbols = original_symbols;
+                
+                // Update consumed variables from the block
+                for (name, final_type) in final_symbols {
+                    if let Some(original_type) = self.symbols.get(&name) {
+                        match (&original_type, &final_type) {
+                            // If a variable was consumed in the block, keep it consumed
+                            (Type::Field(LinearityKind::Linear), Type::Field(LinearityKind::Consumed)) => {
+                                self.symbols.insert(name, final_type);
+                            }
+                            (Type::Bool(LinearityKind::Linear), Type::Bool(LinearityKind::Consumed)) => {
+                                self.symbols.insert(name, final_type);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                
                 Ok(result_type)
             }
             Expression::Match { value, patterns } => {
@@ -510,10 +529,7 @@ impl TypeChecker {
                     self.consume_variable(name)?;
                 }
             }
-            Operator::Equal | Operator::NotEqual | Operator::Lt | Operator::Gt | Operator::Le | Operator::Ge => {
-                // Comparison oprations READ their operands (don't consume)
-                // Already read in check_expression, so nothing to do here
-            }
+            Operator::Equal | Operator::NotEqual | Operator::Lt | Operator::Gt | Operator::Le | Operator::Ge => {}
             Operator::And | Operator::Or => {
                 if let Some(name) = left_name {
                     self.consume_variable(name)?;
@@ -522,14 +538,7 @@ impl TypeChecker {
                     self.consume_variable(name)?;
                 }
             }
-            Operator::Assert => {
-                if let Some(name) = left_name {
-                    self.consume_variable(name)?;
-                }
-                if let Some(name) = right_name {
-                    self.consume_variable(name)?;
-                }
-            }
+            Operator::Assert => {}
         }
         
         match op {
@@ -586,8 +595,8 @@ impl TypeChecker {
             }
             
             Operator::Assert => {
-                if *left == *right {
-                    Ok(Type::Unit)
+                if self.types_compatible(left, right) {
+                    Ok(Type::Bool(LinearityKind::Linear))
                 } else {
                     Err(TypeError::TypeMismatch { expected: left.clone(), found: right.clone() })
                 }

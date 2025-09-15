@@ -339,3 +339,31 @@ fn test_parse_comparison_operators() {
         _ => panic!("Expected Proof"),
     }
 }
+
+#[test]
+fn test_parse_function_let_syntax() {
+    // Test the supported let function syntax
+    let source = r#"
+    let square (x: Field): Field = x * x
+    
+    proof Test {
+        input y: Field;
+        output result: Field;
+        assert result === square(y);
+    }"#;
+    
+    let result = parse_source(source);
+    
+    // This should work
+    assert!(result.is_ok(), "Expected successful parse for let syntax");
+    
+    let expressions = result.unwrap();
+    assert_eq!(expressions.len(), 2);
+    
+    match (&expressions[0], &expressions[1]) {
+        (Expression::FunctionDef { name, .. }, Expression::Proof { .. }) => {
+            assert_eq!(name, "square");
+        }
+        _ => panic!("Expected FunctionDef and Proof"),
+    }
+}

@@ -130,7 +130,40 @@ impl<T: Iterator<Item = Token>> Parser<T> {
         }
     }
 
-    let body = self.parse_expression()?;
+    // Parse the body as a sequence of statements
+    let mut statements = Vec::new();
+    
+    while let Some(token) = self.peek() {
+        if token == &Token::Symbol(Symbol::RBrace) {
+          break;
+        }
+        
+        let expr = self.parse_expression()?;
+        statements.push(expr);
+        
+        // Handle optional semicolon
+        if let Some(Token::Symbol(Symbol::Semi)) = self.peek() {
+          self.tokens.next();
+        }
+        
+        // If we encounter a closing brace, break
+        if let Some(Token::Symbol(Symbol::RBrace)) = self.peek() {
+          break;
+        }
+    }
+
+    let body = if statements.is_empty() {
+        return Err(ParseError::InvalidExpression);
+    } else if statements.len() == 1 {
+        statements.into_iter().next().unwrap()
+    } else {
+        let mut stmts = statements;
+        let final_expr = stmts.pop().map(Box::new);
+        Expression::Block {
+            statements: stmts,
+            final_expr,
+        }
+    };
 
     self.expect(Token::Symbol(Symbol::RBrace))?;
 
@@ -273,6 +306,18 @@ impl<T: Iterator<Item = Token>> Parser<T> {
     };
 
     match next_token {
+        Token::Keyword(Keyword::Field) => {
+            self.tokens.next();
+            Ok(Type::Field(crate::ast::LinearityKind::Linear))
+        }
+        Token::Keyword(Keyword::Bool) => {
+            self.tokens.next();
+            Ok(Type::Bool(crate::ast::LinearityKind::Linear))
+        }
+        Token::Keyword(Keyword::Nat) => {
+            self.tokens.next();
+            Ok(Type::Nat)
+        }
         Token::Identifier(name) => {
             self.tokens.next();
             if name == "array" {
@@ -325,7 +370,7 @@ impl<T: Iterator<Item = Token>> Parser<T> {
   }
 
   /// Grammar: `BinaryExpression ::= PrimaryExpression (Operator PrimaryExpression)*`
-  /// with operator precedence: Assert(1) < Equal(2) < Add,Sub(3) < Mul(4)
+  /// with operator precedence: Assert(1) < Comparison(2) < Add,Sub(3) < Mul(4)
   fn parse_binary_expression(&mut self) -> ParseResult<Expression> {
     let mut expr_stack = vec![self.parse_primary_expression()?];
     let mut op_stack = Vec::new();
@@ -334,6 +379,11 @@ impl<T: Iterator<Item = Token>> Parser<T> {
       let (op, precedence) = match token {
         Token::Symbol(Symbol::TripleEqual) => (Operator::Assert, 1),
         Token::Symbol(Symbol::Equal) => (Operator::Equal, 2),
+        Token::Symbol(Symbol::NotEqual) => (Operator::NotEqual, 2),
+        Token::Symbol(Symbol::GreaterEq) => (Operator::Ge, 2),
+        Token::Symbol(Symbol::LessEq) => (Operator::Le, 2),
+        Token::Symbol(Symbol::RAngle) => (Operator::Gt, 2),
+        Token::Symbol(Symbol::LAngle) => (Operator::Lt, 2),
         Token::Symbol(Symbol::Plus) => (Operator::Add, 3),
         Token::Symbol(Symbol::Star) => (Operator::Mul, 4),
         Token::Symbol(Symbol::Minus) => (Operator::Sub, 3),
@@ -347,7 +397,7 @@ impl<T: Iterator<Item = Token>> Parser<T> {
       while let Some(top_op) = op_stack.last() {
         let top_precedence = match top_op {
           Operator::Assert => 1,
-          Operator::Equal => 2,
+          Operator::Equal | Operator::NotEqual | Operator::Ge | Operator::Le | Operator::Gt | Operator::Lt => 2,
           Operator::Add | Operator::Sub => 3,
           Operator::Mul => 4,
           _ => 0,
