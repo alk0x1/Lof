@@ -1,6 +1,6 @@
 use std::{collections::HashMap, io::{Read, Seek, Write}, path::PathBuf};
-use crate::ast::{Expression, Operator, Pattern, Signal, Visibility, Type, LinearityKind};
-use tracing::{info, warn, error, debug};
+use crate::ast::{Expression, Operator, Pattern, Visibility, Type, LinearityKind};
+use tracing::{info, warn, debug};
 use std::fmt;
 
 #[derive(Debug)]
@@ -30,8 +30,6 @@ pub struct LinearCombination {
 
 #[derive(Debug, Clone)]
 pub struct R1CSContext {
-    /// Variables that have been consumed (for linearity tracking)
-    pub consumed_vars: std::collections::HashSet<String>,
     /// Current scope variables
     pub variables: HashMap<String, Type>,
 }
@@ -54,7 +52,6 @@ impl R1CSGenerator {
             pub_inputs: Vec::new(),
             witnesses: Vec::new(),
             context: R1CSContext {
-                consumed_vars: std::collections::HashSet::new(),
                 variables: HashMap::new(),
             },
         }
@@ -166,23 +163,6 @@ impl R1CSGenerator {
     fn convert_to_linear_combination(&mut self, expr: &Expression) -> Result<LinearCombination, R1CSError> {
         match expr {
             Expression::Variable(name) => {
-                // Check if variable is consumed
-                if self.context.consumed_vars.contains(name) {
-                    return Err(R1CSError::LinearityViolation(
-                        format!("Variable '{}' has already been consumed", name)
-                    ));
-                }
-                
-                // For linear variables, mark as consumed
-                if let Some(var_type) = self.context.variables.get(name) {
-                    match var_type {
-                        Type::Field(LinearityKind::Linear) | Type::Bool(LinearityKind::Linear) => {
-                            self.context.consumed_vars.insert(name.clone());
-                        }
-                        _ => {} // Copyable variables don't get consumed
-                    }
-                }
-                
                 Ok(LinearCombination {
                     terms: vec![(name.clone(), 1)]
                 })
@@ -220,8 +200,8 @@ impl R1CSGenerator {
             }
             
             Expression::Block { statements, final_expr } => {
-                // Create new scope
-                let saved_context = self.context.clone();
+                // Create new scope but preserve consumed variables from outer scope
+                let saved_variables = self.context.variables.clone();
                 
                 // Process statements
                 for stmt in statements {
@@ -235,8 +215,8 @@ impl R1CSGenerator {
                     LinearCombination { terms: vec![] }
                 };
                 
-                // Restore context (block scoping)
-                self.context = saved_context;
+                self.context.variables = saved_variables;
+                
                 Ok(result)
             }
             
@@ -756,7 +736,6 @@ pub fn read_r1cs_file(path: &PathBuf) -> std::io::Result<R1CSGenerator> {
         pub_inputs,
         witnesses,
         context: R1CSContext {
-            consumed_vars: std::collections::HashSet::new(),
             variables: HashMap::new(),
         },
     })
