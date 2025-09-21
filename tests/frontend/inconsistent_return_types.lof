@@ -1,0 +1,7 @@
+// SHOULD_FAIL - Inconsistent return types in match arms
+proof InconsistentReturnTypes {
+    input x: field;
+    match x with
+    | 0 => 1        // returns field
+    | _ => true     // ERROR: returns bool, type mismatch
+}

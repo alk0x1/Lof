@@ -296,3 +296,52 @@ fn test_function_linearity() {
     
     assert!(type_check_fails_with_consumed_error(source));
 }
+
+#[test]
+fn test_multiple_consumption_in_assertions() {
+    // Test replicating the bug where a witness variable is consumed multiple times
+    let source = r#"
+    proof TestProof {
+        input threshold: Field;
+        input hash: Field;
+        witness value: Field;
+        witness salt: Field;
+        
+        // First consumption in comparison
+        assert value >= threshold;
+        
+        // Second consumption in arithmetic operation
+        let computed_hash = value + salt in
+        assert hash === computed_hash;
+        
+        // Third consumption in another comparison
+        assert value >= 0;
+    }"#;
+    
+    // Test should pass - let's see what error we get
+    match parse_and_type_check(source) {
+        Ok(()) => println!("SUCCESS: Test passed!"),
+        Err(e) => {
+            println!("ERROR: {:?}", e);
+            panic!("Test failed with error: {:?}", e);
+        }
+    }
+}
+
+#[test]
+fn test_assert_should_not_consume_variables() {
+    // Variables used in assert statements should NOT be consumed
+    // This test shows the bug where assert incorrectly consumes variables
+    let source = r#"
+    proof TestProof {
+        witness x: Field;
+        
+        // These should all be non-consuming reads, not consumption
+        assert x >= 0;
+        assert x >= 0;  // Should be allowed - same variable, multiple asserts
+    }"#;
+    
+    // This should PASS because assert should not consume variables
+    // But currently fails due to the bug
+    assert!(type_check_passes(source));
+}

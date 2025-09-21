@@ -1,0 +1,9 @@
+// SHOULD_FAIL - Variable used after being consumed by match
+proof VariableUsedAfterMatch {
+    input x: field;
+    let result = match x with
+                 | 0 => 1
+                 | _ => 2 in
+    let doubled = x * 2 in  // ERROR: x already consumed by match
+    result
+}

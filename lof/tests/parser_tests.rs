@@ -1,6 +1,6 @@
 use lof::parser::Parser;
 use lof::lexer::Lexer;
-use lof::ast::{Expression, Operator, Visibility};
+use lof::ast::{Expression, Visibility};
 
 fn parse_source(source: &str) -> Result<Vec<Expression>, String> {
     let lexer = Lexer::new(source);
@@ -367,3 +367,4 @@ fn test_parse_function_let_syntax() {
         _ => panic!("Expected FunctionDef and Proof"),
     }
 }
+
