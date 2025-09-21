@@ -83,6 +83,7 @@ impl TypeChecker {
             .cloned()
             .ok_or_else(|| TypeError::UndefinedVariable(name.to_string()))?;
         
+        
         match &var_type {
             Type::Field(LinearityKind::Consumed) | Type::Bool(LinearityKind::Consumed) => {
                 Err(TypeError::VariableAlreadyConsumed(name.to_string()))
@@ -141,11 +142,9 @@ impl TypeChecker {
             .cloned()
             .ok_or_else(|| TypeError::UndefinedVariable(name.to_string()))?;
         
-        println!("DEBUG: Trying to consume '{}' with type {:?}", name, var_type);
         
         match &var_type {
             Type::Field(LinearityKind::Consumed) | Type::Bool(LinearityKind::Consumed) => {
-                println!("DEBUG: Variable '{}' already consumed!", name);
                 return Err(TypeError::VariableAlreadyConsumed(name.to_string()));
             }
             _ => {}
@@ -153,15 +152,12 @@ impl TypeChecker {
         
         match &var_type {
             Type::Field(LinearityKind::Linear) => {
-                println!("DEBUG: Consuming linear variable '{}'", name);
                 self.symbols.insert(name.to_string(), Type::Field(LinearityKind::Consumed));
             }
             Type::Bool(LinearityKind::Linear) => {
-                println!("DEBUG: Consuming linear bool variable '{}'", name);
                 self.symbols.insert(name.to_string(), Type::Bool(LinearityKind::Consumed));
             }
             _ => {
-                println!("DEBUG: Variable '{}' is copyable, not consuming", name);
             }
         }
         
@@ -247,7 +243,6 @@ impl TypeChecker {
         }
     
         for arg_expr in arguments {
-            println!("DEBUG: apply_function processing argument: {:?}", arg_expr);
             
             match function_type {
                 Type::Function { params, return_type } => {
@@ -259,13 +254,9 @@ impl TypeChecker {
                     }
                     
                     let arg_type = self.check_expression(arg_expr)?;
-                    println!("DEBUG: Argument type checked: {:?}", arg_type);
                     
                     if let Expression::Variable(var_name) = arg_expr {
-                        println!("DEBUG: About to consume variable: {}", var_name);
-                        println!("DEBUG: Symbols before consumption: {:?}", self.symbols);
                         self.consume_variable(var_name)?;
-                        println!("DEBUG: Symbols after consumption: {:?}", self.symbols);
                     }
                     
                     function_type = *return_type;
@@ -529,7 +520,8 @@ impl TypeChecker {
                     self.consume_variable(name)?;
                 }
             }
-            Operator::Equal | Operator::NotEqual | Operator::Lt | Operator::Gt | Operator::Le | Operator::Ge => {}
+            Operator::Equal | Operator::NotEqual | Operator::Lt | Operator::Gt | Operator::Le | Operator::Ge => {
+            }
             Operator::And | Operator::Or => {
                 if let Some(name) = left_name {
                     self.consume_variable(name)?;
