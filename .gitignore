@@ -3,3 +3,11 @@ user_test
 examples
 features
 *.lock
+zk_verification
+*.lock
+tree.txt
+settings.json
+lean.lean
+
+# Verification framework outputs
+verification/outputs/
