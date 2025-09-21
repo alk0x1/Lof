@@ -11,3 +11,6 @@ lean.lean
 
 # Verification framework outputs
 verification/outputs/
+
+# Documentation
+docs/
