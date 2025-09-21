@@ -37,7 +37,7 @@ enum Commands {
     #[arg(short, long)]
     verbose: bool,
   },
-  /// Compile a Lof source file and generate R1CS with organized output
+  /// Compile a Lof source file to R1CS or WASM
   Compile {
     #[arg(value_name = "FILE")]
     file: PathBuf,
@@ -45,7 +45,7 @@ enum Commands {
     #[arg(short, long)]
     verbose: bool,
     
-    /// Target to compile to
+    /// Target: r1cs (default) or wasm. Use --target wasm for WebAssembly
     #[arg(short, long, value_enum, default_value = "r1cs")]
     target: Target,
     

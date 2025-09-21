@@ -83,7 +83,6 @@ pub fn generate_wasm_witness_calculator(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::env;
 
     #[test]
     fn test_codegen_config_validation() {

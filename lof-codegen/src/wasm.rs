@@ -1,6 +1,5 @@
 use std::path::PathBuf;
 use std::fs;
-use std::io::Write;
 use std::process::Command;
 
 #[derive(Debug)]
@@ -59,10 +58,10 @@ pub fn generate_witness_calculator(config: WasmConfig) -> Result<(), WasmError> 
     
     generate_nodejs_wrapper(&wasm_dir, &config.circuit_name)?;
     
-    println!("✅ WASM witness calculator generated successfully!");
-    println!("📁 Generated files in: {}", wasm_dir.display());
-    println!("🚀 Import from: {}/pkg/", wasm_dir.display());
-    println!("🧪 Test with: node {}/generate_witness.js", wasm_dir.display());
+    println!("WASM witness calculator generated successfully!");
+    println!("Generated files in: {}", wasm_dir.display());
+    println!("Import from: {}/pkg/", wasm_dir.display());
+    println!("Test with: node {}/generate_witness.js", wasm_dir.display());
     
     Ok(())
 }
@@ -71,7 +70,7 @@ fn create_wasm_crate_structure(wasm_dir: &PathBuf) -> Result<(), WasmError> {
     fs::create_dir_all(wasm_dir)?;
     fs::create_dir_all(wasm_dir.join("src"))?;
     
-    println!("📁 Created WASM crate structure");
+    println!("Created WASM crate structure");
     Ok(())
 }
 
@@ -125,10 +124,7 @@ debug = false
     let cargo_path = wasm_dir.join("Cargo.toml");
     fs::write(&cargo_path, cargo_toml)?;
     
-    println!("📝 Generated Cargo.toml at: {}", cargo_path.display());
-    if let Ok(content) = fs::read_to_string(&cargo_path) {
-        println!("DEBUG - Generated Cargo.toml content:\n{}", content);
-    }
+    println!("Generated Cargo.toml at: {}", cargo_path.display());
     
     Ok(())
 }
@@ -350,7 +346,7 @@ fn parse_embedded_r1cs(r1cs_data: &[u8]) -> Result<ConstraintSystem, String> {{
     let lib_path = wasm_dir.join("src").join("lib.rs");
     fs::write(lib_path, lib_rs)?;
     
-    println!("📝 Generated lib.rs");
+    println!("Generated lib.rs");
     Ok(())
 }
 
@@ -384,7 +380,7 @@ fn embed_r1cs_data(wasm_dir: &PathBuf, r1cs_data: &[u8]) -> Result<(), WasmError
     let embedded_path = wasm_dir.join("src").join("embedded_r1cs.rs");
     fs::write(embedded_path, embedded_rs)?;
     
-    println!("📝 Embedded R1CS data ({} bytes)", r1cs_data.len());
+    println!("Embedded R1CS data ({} bytes)", r1cs_data.len());
     Ok(())
 }
 
@@ -524,7 +520,7 @@ mod tests {
     let solver_path = wasm_dir.join("src").join("solver.rs");
     fs::write(solver_path, solver_rs)?;
     
-    println!("📝 Generated solver.rs");
+    println!("Generated solver.rs");
     Ok(())
 }
 
@@ -698,13 +694,12 @@ impl std::fmt::Display for Constraint {
     let types_path = wasm_dir.join("src").join("r1cs_types.rs");
     fs::write(types_path, r1cs_types)?;
     
-    println!("📝 Generated r1cs_types.rs");
+    println!("Generated r1cs_types.rs");
     Ok(())
 }
 
 fn build_wasm(wasm_dir: &PathBuf) -> Result<(), WasmError> {
-    println!("🔨 Building WASM package with wasm-pack...");
-    println!("DEBUG - Building in directory: {}", wasm_dir.display());
+    println!("Building WASM package with wasm-pack...");
     
     // Clean previous build
     let pkg_dir = wasm_dir.join("pkg");
@@ -729,8 +724,6 @@ fn build_wasm(wasm_dir: &PathBuf) -> Result<(), WasmError> {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
         
-        println!("DEBUG - wasm-pack STDOUT:\n{}", stdout);
-        println!("DEBUG - wasm-pack STDERR:\n{}", stderr);
         
         return Err(WasmError::BuildFailed(format!(
             "wasm-pack build failed:\nSTDOUT: {}\nSTDERR: {}", 
@@ -858,7 +851,7 @@ module.exports = {{ generateWitness }};
     // Generate a simple browser example
     generate_browser_example(wasm_dir, circuit_name)?;
     
-    println!("📝 Generated Node.js wrapper and browser example");
+    println!("Generated Node.js wrapper and browser example");
     Ok(())
 }
 
