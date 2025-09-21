@@ -1,0 +1,30 @@
+{
+  "circuit_name": "multiply",
+  "description": "Basic multiplication circuit: a * b = c",
+  "test_vectors": [
+    {
+      "name": "basic_multiply",
+      "inputs": {"a": "5", "b": "7"},
+      "expected_outputs": {"c": "35"}
+    },
+    {
+      "name": "zero_multiply", 
+      "inputs": {"a": "0", "b": "999"},
+      "expected_outputs": {"c": "0"}
+    },
+    {
+      "name": "identity_multiply",
+      "inputs": {"a": "42", "b": "1"},
+      "expected_outputs": {"c": "42"}
+    },
+    {
+      "name": "large_numbers",
+      "inputs": {"a": "123", "b": "456"},
+      "expected_outputs": {"c": "56088"}
+    }
+  ],
+  "validation_rules": {
+    "max_constraint_ratio": 2.0,
+    "require_exact_outputs": true
+  }
+}
