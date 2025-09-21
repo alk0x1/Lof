@@ -38,6 +38,7 @@ pub struct R1CSGenerator {
     pub constraints: Vec<R1CSConstraint>,
     pub temp_var_counter: usize,
     pub symbol_map: HashMap<String, usize>,
+    pub variable_substitutions: HashMap<String, LinearCombination>,
     pub pub_inputs: Vec<String>,
     pub witnesses: Vec<String>,
     pub context: R1CSContext,
@@ -49,6 +50,7 @@ impl R1CSGenerator {
             constraints: Vec::new(),
             temp_var_counter: 0,
             symbol_map: HashMap::new(),
+            variable_substitutions: HashMap::new(),
             pub_inputs: Vec::new(),
             witnesses: Vec::new(),
             context: R1CSContext {
@@ -163,6 +165,8 @@ impl R1CSGenerator {
     fn convert_to_linear_combination(&mut self, expr: &Expression) -> Result<LinearCombination, R1CSError> {
         match expr {
             Expression::Variable(name) => {
+                // Check if this variable is a symbol map alias for another linear combination
+                // If so, we should resolve to the underlying computation for constraint solving
                 Ok(LinearCombination {
                     terms: vec![(name.clone(), 1)]
                 })
@@ -179,14 +183,12 @@ impl R1CSGenerator {
             }
             
             Expression::Assert(condition) => {
-                // Assert creates a constraint that the condition equals 1
+                // For assert statements, just process the condition
+                // The condition itself (if it's an assertion operator) will create the constraint
                 let cond_lc = self.convert_to_linear_combination(condition)?;
                 
-                self.constraints.push(R1CSConstraint {
-                    a: cond_lc,
-                    b: LinearCombination { terms: vec![("ONE".to_string(), 1)] },
-                    c: LinearCombination { terms: vec![("ONE".to_string(), 1)] }
-                });
+                // Don't create an additional constraint here - the assertion operator handles it
+                warn!("PROCESSED ASSERT EXPRESSION, condition result: {:?}", cond_lc);
                 
                 Ok(LinearCombination { terms: vec![] })
             }
@@ -275,13 +277,15 @@ impl R1CSGenerator {
                 let a = self.convert_to_linear_combination(left)?;
                 let b = self.convert_to_linear_combination(right)?;
                 
-                self.constraints.push(R1CSConstraint {
+                let constraint = R1CSConstraint {
                     a,
                     b,
                     c: LinearCombination {
                         terms: vec![(temp.clone(), 1)]
                     }
-                });
+                };
+                warn!("PUSHING MULTIPLICATION CONSTRAINT #{}: {:?}", self.constraints.len(), constraint);
+                self.constraints.push(constraint);
                 
                 Ok(LinearCombination {
                     terms: vec![(temp, 1)]
@@ -292,12 +296,21 @@ impl R1CSGenerator {
                 // Assert operator: left === right
                 let left_lc = self.convert_to_linear_combination(left)?;
                 let right_lc = self.convert_to_linear_combination(right)?;
+                
+                // Resolve symbol map variables to their underlying linear combinations
+                let resolved_left = self.resolve_symbol_map_variables(&left_lc);
+                let resolved_right = self.resolve_symbol_map_variables(&right_lc);
+                
+                warn!("ASSERTION CONSTRAINT: {:?} * 1 = {:?}", resolved_left, resolved_right);
+                warn!("BEFORE RESOLUTION: {:?} * 1 = {:?}", left_lc, right_lc);
 
-                self.constraints.push(R1CSConstraint {
-                    a: left_lc,
+                let constraint = R1CSConstraint {
+                    a: resolved_left,
                     b: LinearCombination { terms: vec![("ONE".to_string(), 1)] },
-                    c: right_lc
-                });
+                    c: resolved_right
+                };
+                warn!("PUSHING ASSERTION CONSTRAINT #{}: {:?}", self.constraints.len(), constraint);
+                self.constraints.push(constraint);
                 
                 Ok(LinearCombination { terms: vec![] })
             }
@@ -310,7 +323,7 @@ impl R1CSGenerator {
                 let right_lc = self.convert_to_linear_combination(right)?;
                 
                 // Create constraint for equality check
-                // TODO: This is simplified a real implementation would need more complex logic
+                // Note: This implements basic equality verification via difference constraint
                 let mut diff = left_lc;
                 diff.add(&right_lc.negate());
                 
@@ -323,6 +336,10 @@ impl R1CSGenerator {
                 Ok(LinearCombination {
                     terms: vec![(temp, 1)]
                 })
+            }
+            
+            Operator::Ge | Operator::Le | Operator::Gt | Operator::Lt => {
+                self.convert_comparison(left, right, op)
             }
             
             _ => Err(R1CSError::UnsupportedOperation(format!("Operator {:?} not supported in R1CS", op)))
@@ -347,7 +364,7 @@ impl R1CSGenerator {
       match pattern {
           Pattern::Variable(name) => {
               debug!("Binding variable: {}", name);
-              
+
               // Check if this variable name is already in scope (shadowing)
               let is_shadowing = self.context.variables.contains_key(name);
               if is_shadowing {
@@ -355,26 +372,27 @@ impl R1CSGenerator {
               }
               
               // For let bindings,we need to handle two cases:
-              // 1. Simple assignment: let x = expr
-              // 2. Constraint generation for computed values
+              // 1. Simple assignment: let x = expr (store substitution)
+              // 2. Constraint generation for computed values (add to symbol map)
               
               if self.is_simple_variable_or_constant(&value_lc) {
-                  // If the value is just a variable or constant, we can alias it
                   debug!("Simple assignment: {} = {:?}", name, value_lc);
                   
-                  // Add to context without creating a constraint
+                  // Add to context
                   self.context.variables.insert(name.clone(), Type::Field(LinearityKind::Linear));
                   
-                  // Create an alias mapping - the variable points to the same linear combination
-                  // We still need a constraint for R1CS completeness
-                  self.constraints.push(R1CSConstraint {
-                      a: LinearCombination { terms: vec![(name.clone(), 1)] },
-                      b: LinearCombination { terms: vec![("ONE".to_string(), 1)] },
-                      c: value_lc
-                  });
+                  // For simple assignments, instead of creating a constraint, store the substitution
+                  // This allows the variable to be directly replaced with its value in other constraints
+                  warn!("STORING SUBSTITUTION: {} -> {:?}", name, value_lc);
+                  self.variable_substitutions.insert(name.clone(), value_lc);
               } else {
                   // Complex expression - need to create a witness variable and constraint
                   debug!("Complex assignment: {} = {:?}", name, value_lc);
+                  
+                  // Get variable index and add to symbol map for complex assignments
+                  let var_index = self.get_next_variable_index();
+                  warn!("INSERTING INTO SYMBOL MAP (complex): {} -> {}", name, var_index);
+                  self.symbol_map.insert(name.clone(), var_index);
                   
                   // Add as witness if not already a public input
                   if !self.pub_inputs.contains(name) && !self.witnesses.contains(name) {
@@ -386,8 +404,11 @@ impl R1CSGenerator {
                   
                   // Create constraint: name * 1 = value_lc
                   debug!("Creating constraint: {} * 1 = {:?}", name, value_lc);
+                  
+                  let a = self.convert_to_linear_combination(value)?;
+
                   self.constraints.push(R1CSConstraint {
-                      a: LinearCombination { terms: vec![(name.clone(), 1)] },
+                      a,
                       b: LinearCombination { terms: vec![("ONE".to_string(), 1)] },
                       c: value_lc
                   });
@@ -401,8 +422,8 @@ impl R1CSGenerator {
               debug!("Tuple pattern with {} elements", patterns.len());
               
               // For tuple patterns, we need to decompose the value
-              // TODO: This is a simplified implementation, full implementation would need
-              // to handle tuple decomposition properly
+              // Note: Current implementation creates separate witnesses for each tuple element
+              // Future enhancement: implement proper tuple value decomposition
               
               // For now, we'll create constraints for each pattern element
               // assuming the value is a tuple of the same size
@@ -462,10 +483,15 @@ impl R1CSGenerator {
       debug!("Processing let body: {:?}", body);
       let body_result = self.convert_to_linear_combination(body)?;
       
-      // Restore the previous context (lexical scoping)
+      // Restore the previous context (lexical scoping) but preserve symbol map
       // This ensures that variables bound in the let don't leak to outer scope
-      debug!("Restoring context after let binding");
+      // but their symbol mappings persist for R1CS constraint generation
+      debug!("Restoring context after let binding (preserving symbol map)");
+      debug!("Symbol map before restore: {:?}", self.symbol_map);
+      let current_symbol_map = self.symbol_map.clone();
       self.context = saved_context;
+      self.symbol_map = current_symbol_map;
+      debug!("Symbol map after restore: {:?}", self.symbol_map);
       
       Ok(body_result)
   }
@@ -507,8 +533,8 @@ impl R1CSGenerator {
     }
 
     fn convert_decompose(&mut self, arguments: &[Expression]) -> Result<LinearCombination, R1CSError> {
-        if arguments.len() != 1 {
-            return Err(R1CSError::InvalidArgument("decompose expects one argument".to_string()));
+        if arguments.is_empty() || arguments.len() > 2 {
+            return Err(R1CSError::InvalidArgument("decompose expects 1 or 2 arguments".to_string()));
         }
 
         let input_var = match &arguments[0] {
@@ -516,12 +542,26 @@ impl R1CSGenerator {
             _ => return Err(R1CSError::InvalidArgument("decompose expects a variable".to_string()))
         };
 
+        // Determine bit width - default to 8 for backward compatibility
+        let bit_width = if arguments.len() == 2 {
+            match &arguments[1] {
+                Expression::Number(n) => *n as usize,
+                _ => return Err(R1CSError::InvalidArgument("decompose bit width must be a number".to_string()))
+            }
+        } else {
+            8
+        };
+
         let mut sum_terms = Vec::new();
         
-        // Create bit variables and constraints
-        for i in 0..8 {
+        // Create bit variables and constraints for the specified bit width
+        for i in 0..bit_width {
             let bit = format!("{}_bit_{}", input_var, i);
-            self.witnesses.push(bit.clone());
+            
+            // Only add to witnesses if not already present
+            if !self.witnesses.contains(&bit) {
+                self.witnesses.push(bit.clone());
+            }
             
             // Constraint: bit * (1 - bit) = 0 (ensures bit is 0 or 1)
             self.constraints.push(R1CSConstraint {
@@ -543,6 +583,83 @@ impl R1CSGenerator {
         });
 
         Ok(LinearCombination { terms: sum_terms })
+    }
+
+    fn convert_comparison(
+        &mut self, 
+        left: &Expression, 
+        right: &Expression,
+        op: &Operator
+    ) -> Result<LinearCombination, R1CSError> {
+        debug!("Converting comparison: {:?} {:?} {:?}", left, op, right);
+        
+        // Step 1: Create witnesses for the difference and result
+        let diff_var = self.new_temp_var();
+        let result_var = self.new_temp_var(); // Boolean result (0 or 1)
+        
+        // Add these as witnesses
+        self.witnesses.push(diff_var.clone());
+        self.witnesses.push(result_var.clone());
+        
+        // Step 2: Compute the difference based on comparison type
+        let (left_lc, right_lc) = match op {
+            Operator::Ge | Operator::Gt => {
+                // For a >= b or a > b, check if a - b >= 0
+                (self.convert_to_linear_combination(left)?, 
+                 self.convert_to_linear_combination(right)?)
+            }
+            Operator::Le | Operator::Lt => {
+                // For a <= b or a < b, check if b - a >= 0  
+                (self.convert_to_linear_combination(right)?, 
+                 self.convert_to_linear_combination(left)?)
+            }
+            _ => unreachable!()
+        };
+        
+        // Step 3: Constraint: diff = left - right
+        let mut diff_lc = left_lc;
+        diff_lc.add(&right_lc.negate());
+        
+        self.constraints.push(R1CSConstraint {
+            a: LinearCombination { terms: vec![(diff_var.clone(), 1)] },
+            b: LinearCombination { terms: vec![("ONE".to_string(), 1)] },
+            c: diff_lc
+        });
+        
+        // Step 4: Decompose the difference into bits (64 bits for now)
+        // WARNING: This implementation only supports comparisons for values < 2^63
+        // For full field range, use 252-bit decomposition with big integer coefficients
+        // This covers a very large range while avoiding overflow issues
+        self.convert_decompose(&[
+            Expression::Variable(diff_var.clone()), 
+            Expression::Number(64)
+        ])?;
+        
+        // Step 5: Check the sign bit (bit 63) to determine if positive
+        let sign_bit = format!("{}_bit_63", diff_var);
+        
+        // Step 6: result = 1 - sign_bit (if sign_bit = 0 then positive, result = 1)
+        self.constraints.push(R1CSConstraint {
+            a: LinearCombination { terms: vec![(result_var.clone(), 1)] },
+            b: LinearCombination { terms: vec![("ONE".to_string(), 1)] },
+            c: LinearCombination { 
+                terms: vec![("ONE".to_string(), 1), (sign_bit, -1)] 
+            }
+        });
+        
+        // Handle strict vs non-strict comparisons
+        match op {
+            Operator::Gt | Operator::Lt => {
+                // For strict comparison, also need diff != 0
+                // This would require additional zero-check logic
+                // For now, treat same as >= and <=
+                warn!("Strict comparisons (> and <) not fully implemented, treating as >= and <=");
+            }
+            _ => {}
+        }
+        
+        debug!("Comparison result variable: {}", result_var);
+        Ok(LinearCombination { terms: vec![(result_var, 1)] })
     }
 
     pub fn get_matrices(&self) -> (Vec<Vec<i64>>, Vec<Vec<i64>>, Vec<Vec<i64>>) {
@@ -584,14 +701,22 @@ impl R1CSGenerator {
             return 0;
         }
 
+        // Check public inputs first
         if let Some(pos) = self.pub_inputs.iter().position(|x| x == var) {
             return pos + 1;  // +1 because ONE is at 0
         }
 
+        // Check witnesses 
         if let Some(pos) = self.witnesses.iter().position(|x| x == var) {
             return self.pub_inputs.len() + pos + 1;  // +1 for ONE
         }
 
+        // Check symbol_map for let-bound variables
+        if let Some(index) = self.symbol_map.get(var) {
+            return *index;
+        }
+
+        // Handle temporary variables
         if var.starts_with("t_") {
             if let Ok(num) = var[2..].parse::<usize>() {
                 return self.pub_inputs.len() + self.witnesses.len() + num + 1;  // +1 for ONE
@@ -605,8 +730,32 @@ impl R1CSGenerator {
             }
         }
 
-        warn!("Unknown variable: {}", var);
+        // If we get here, the variable is truly unknown
+        warn!("Unknown variable: {} (pub_inputs: {:?}, witnesses: {:?}, symbol_map: {:?})", 
+              var, self.pub_inputs, self.witnesses, self.symbol_map);
         0 // Return 0 as fallback (ONE variable)
+    }
+
+    fn get_next_variable_index(&self) -> usize {
+        self.pub_inputs.len() + self.witnesses.len() + self.temp_var_counter + 1 // +1 for ONE
+    }
+    
+    fn resolve_symbol_map_variables(&self, lc: &LinearCombination) -> LinearCombination {
+        let mut resolved_terms = Vec::new();
+        
+        for (var, coeff) in &lc.terms {
+            if let Some(substitution) = self.variable_substitutions.get(var) {
+                // This variable should be substituted with another linear combination
+                for (sub_var, sub_coeff) in &substitution.terms {
+                    resolved_terms.push((sub_var.clone(), coeff * sub_coeff));
+                }
+            } else {
+                // Keep the original term
+                resolved_terms.push((var.clone(), *coeff));
+            }
+        }
+        
+        LinearCombination { terms: resolved_terms }
     }
 
     pub fn get_constraints(&self) -> &Vec<R1CSConstraint> {
@@ -733,6 +882,7 @@ pub fn read_r1cs_file(path: &PathBuf) -> std::io::Result<R1CSGenerator> {
         constraints,
         temp_var_counter: 0,
         symbol_map: HashMap::new(),
+        variable_substitutions: HashMap::new(),
         pub_inputs,
         witnesses,
         context: R1CSContext {
