@@ -1,0 +1,7 @@
+// SHOULD_FAIL - Assert then variable reuse
+proof AssertInvalidReuse {
+    input x: field;
+    let _ = assert(x == 42) in
+    let y = x + 1 in
+    y
+}

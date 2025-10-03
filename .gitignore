@@ -1,1 +1,31 @@
 target
+user_test
+examples
+features
+*.lock
+zk_verification
+*.lock
+tree.txt
+settings.json
+lean.lean
+
+# Verification framework outputs
+verification/outputs/
+
+# Documentation
+docs/
+
+# ZK proof generated files
+*.r1cs
+*.bin
+*.wtns
+*_witness.json
+*_public.json
+full_witness.json
+
+# WASM outputs  
+*.wasm
+*.js
+
+# User test outputs
+user_test/

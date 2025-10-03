@@ -1,0 +1,6 @@
+// SHOULD_PASS - Empty tuple
+proof EmptyTuple {
+    input x: field;
+    let empty = () in
+    x
+}

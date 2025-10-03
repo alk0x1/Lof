@@ -3,78 +3,126 @@ use std::fmt;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
     // Core types
-    Field,
+    Field(LinearityKind),
     Bits(Box<Expression>),
-    Array(Box<Type>, Box<Expression>),
+    Array {
+      element_type: Box<Type>,
+      size: usize,
+    },
     Nat,
-    Bool,
+    Bool(LinearityKind),
     
     // Type abstractions
     Custom(String),
     GenericType(String),
     
     Unit,
-    
-    Refined(Box<Type>, Box<Expression>)  // Types with predicates
+  
+    Function {
+      params: Vec<Type>,
+      return_type: Box<Type>,
+    },
+
+    Refined(Box<Type>, Box<Expression>),
+    Identifier(String),
+    Tuple(Vec<Type>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum LinearityKind {
+    Linear,
+    Copyable,  
+    Consumed,
 }
 
 impl fmt::Display for Type {
   fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
     match self {
-      Type::Field => write!(f, "Field"),
+      Type::Field(LinearityKind::Linear) => write!(f, "field^linear"),
+      Type::Field(LinearityKind::Copyable) => write!(f, "field^copyable"),
+      Type::Field(LinearityKind::Consumed) => write!(f, "field^consumed"),
       Type::Bits(size) => write!(f, "Bits<{:?}>", size),
-      Type::Array(elem_type, size) => write!(f, "Array<{}, {:?}>", elem_type, size),
+      Type::Array { element_type, size } => write!(f, "Array<{}, {}>", element_type, size),
       Type::Nat => write!(f, "Nat"),
-      Type::Bool => write!(f, "Bool"),
+      Type::Bool(LinearityKind::Linear) => write!(f, "Bool^linear"),
+      Type::Bool(LinearityKind::Copyable) => write!(f, "Bool^copyable"),
+      Type::Bool(LinearityKind::Consumed) => write!(f, "Bool^consumed"),
       Type::Custom(name) => write!(f, "{}", name),
       Type::GenericType(name) => write!(f, "{}", name),
       Type::Unit => write!(f, "()"),
+      Type::Function { params, return_type } => {
+        let params_str = params.iter().map(|t| format!("{}", t)).collect::<Vec<_>>().join(", ");
+        write!(f, "Function<({}), {}>", params_str, return_type)
+      }
       Type::Refined(base, expr) => write!(f, "Refined<{}, {:?}>", base, expr),
+      Type::Identifier(name) => write!(f, "{}", name),
+      Type::Tuple(types) => {
+        let types_str = types.iter().map(|t| format!("{}", t)).collect::<Vec<_>>().join(", ");
+        write!(f, "Tuple<{}>", types_str)
+      }
     }
   }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expression {
-  Number(i64),
-  Variable(String),
-  BinaryOp {
-    left: Box<Expression>,
-    op: Operator,
-    right: Box<Expression>,
-  },
-  FunctionCall {
-    function: String,
-    arguments: Vec<Expression>,
-  },
-  Block(Vec<Expression>),
-  Match {
-    value: Box<Expression>,
-    patterns: Vec<MatchPattern>,
-  },
-  Proof {
-    name: String,
-    generics: Vec<GenericParam>,
-    signals: Vec<Signal>,
-    constraints: Vec<Constraint>,
-  },
-  Component {
-    name: String,
-    generics: Vec<GenericParam>,
-    signals: Vec<Signal>,
-    constraints: Vec<Constraint>,
-  },
-  Let {
-    name: String,
-    value: Box<Expression>,
-    body: Box<Expression>,
-  },
+    Number(i64),
+    Variable(String),
+    FunctionCall {
+        function: String,
+        arguments: Vec<Expression>,
+    },
+    FunctionDef {
+        name: String,
+        params: Vec<Parameter>,
+        return_type: Type,
+        body: Box<Expression>,
+    },
+    Let {
+        pattern: Pattern,
+        value: Box<Expression>,
+        body: Box<Expression>,
+    },
+    BinaryOp {
+        left: Box<Expression>,
+        op: Operator,
+        right: Box<Expression>,
+    },
+    Match {
+        value: Box<Expression>,
+        patterns: Vec<MatchPattern>,
+    },
+    Block {
+        statements: Vec<Expression>,
+        final_expr: Option<Box<Expression>>,
+    },
+    Component {
+        name: String,
+        generics: Vec<GenericParam>,
+        signals: Vec<Signal>,
+        body: Box<Expression>,
+    },
+    Proof {
+        name: String,
+        generics: Vec<GenericParam>,
+        signals: Vec<Signal>,
+        body: Box<Expression>,
+    },
+    Tuple(Vec<Expression>),
+    Assert(Box<Expression>),
+    Dup(Box<Expression>)
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Signal {
     pub name: String,
     pub visibility: Visibility,
+    pub typ: Type,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Parameter {
+    pub name: String,
     pub typ: Type,
 }
 
@@ -87,10 +135,11 @@ pub enum Visibility {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Pattern {
-  Constructor(String, Vec<Pattern>),
   Variable(String),
-  Number(i64),
+  Tuple(Vec<Pattern>),
   Wildcard,
+  Constructor(String, Vec<Pattern>),
+  Literal(i64)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -109,18 +158,26 @@ pub enum Constraint {
 
 #[derive(Debug, Clone, PartialEq, Copy)]
 pub enum Operator {
-  Add,
-  Sub,
-  Mul,
-  Div,
-  Assert,
-  Lt,
-  Gt,
-  Le,
-  Ge,
-  Eq,
-  Decompose,
-  And
+    // Arithmetic
+    Add,
+    Sub, 
+    Mul,
+    Div,
+
+    // Comparison
+    Equal,    // ==
+    NotEqual, // !=
+    Gt,       // >
+    Lt,       // <
+    Ge,       // >=
+    Le,       // <=
+
+    // Logical
+    And,      // &&
+    Or,       // ||
+
+    // Constraint
+    Assert,   // ===
 }
 
 #[derive(Debug, Clone, PartialEq)]

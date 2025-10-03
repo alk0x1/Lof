@@ -1,0 +1,8 @@
+proof Multiply {
+    input a: field;
+    input b: field;
+    witness c: field;
+    
+    let product = a * b in
+    assert product === c
+}
