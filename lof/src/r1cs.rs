@@ -13,7 +13,6 @@ pub enum R1CSError {
     FileError,
     TypeError(String),
     UnknownVariable(String),
-    LinearityViolation(String),
 }
 
 #[derive(Debug, Clone)]
@@ -801,7 +800,6 @@ impl fmt::Display for R1CSError {
             R1CSError::InvalidArgument(arg) => write!(f, "Invalid argument: {}", arg),
             R1CSError::TypeError(msg) => write!(f, "Type error: {}", msg),
             R1CSError::UnknownVariable(var) => write!(f, "Unknown variable: {}", var),
-            R1CSError::LinearityViolation(msg) => write!(f, "Linearity violation: {}", msg),
         }
     }
 }
