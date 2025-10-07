@@ -308,11 +308,11 @@ impl<T: Iterator<Item = Token>> Parser<T> {
     match next_token {
         Token::Keyword(Keyword::Field) => {
             self.tokens.next();
-            Ok(Type::Field(crate::ast::LinearityKind::Linear))
+            Ok(Type::Field)
         }
         Token::Keyword(Keyword::Bool) => {
             self.tokens.next();
-            Ok(Type::Bool(crate::ast::LinearityKind::Linear))
+            Ok(Type::Bool)
         }
         Token::Keyword(Keyword::Nat) => {
             self.tokens.next();
@@ -448,13 +448,6 @@ impl<T: Iterator<Item = Token>> Parser<T> {
           self.tokens.next();
           let condition = self.parse_expression()?;
           Ok(Expression::Assert(Box::new(condition)))
-      },
-      Token::Keyword(Keyword::Dup) => {
-          self.tokens.next();
-          self.expect(Token::Symbol(Symbol::LParen))?;
-          let expr = self.parse_expression()?;
-          self.expect(Token::Symbol(Symbol::RParen))?;
-          Ok(Expression::Dup(Box::new(expr)))
       },
       Token::Keyword(Keyword::Match) => self.parse_match_expression(),
       _ => Err(ParseError::UnexpectedToken(next_token)),

@@ -1,5 +1,5 @@
 use std::{collections::HashMap, io::{Read, Seek, Write}, path::PathBuf};
-use crate::ast::{Expression, Operator, Pattern, Visibility, Type, LinearityKind};
+use crate::ast::{Expression, Operator, Pattern, Visibility, Type};
 use tracing::{info, warn, debug};
 use std::fmt;
 
@@ -231,14 +231,6 @@ impl R1CSGenerator {
                 Ok(LinearCombination { terms: vec![] })
             }
             
-            Expression::Dup(expr) => {
-                // Dup makes a linear variable copyable
-                let _lc = self.convert_to_linear_combination(expr)?;
-                // The duplication logic would be handled at type level
-                // For R1CS, we just return the same linear combination
-                self.convert_to_linear_combination(expr)
-            }
-            
             Expression::FunctionCall { function, arguments } => {
                 self.convert_function_call(function, arguments)
             }
@@ -379,7 +371,7 @@ impl R1CSGenerator {
                   debug!("Simple assignment: {} = {:?}", name, value_lc);
                   
                   // Add to context
-                  self.context.variables.insert(name.clone(), Type::Field(LinearityKind::Linear));
+                  self.context.variables.insert(name.clone(), Type::Field);
                   
                   // For simple assignments, instead of creating a constraint, store the substitution
                   // This allows the variable to be directly replaced with its value in other constraints
@@ -400,7 +392,7 @@ impl R1CSGenerator {
                       self.witnesses.push(name.clone());
                   }
                   
-                  self.context.variables.insert(name.clone(), Type::Field(LinearityKind::Linear));
+                  self.context.variables.insert(name.clone(), Type::Field);
                   
                   // Create constraint: name * 1 = value_lc
                   debug!("Creating constraint: {} * 1 = {:?}", name, value_lc);
@@ -437,7 +429,7 @@ impl R1CSGenerator {
                               self.witnesses.push(element_name.clone());
                           }
                           
-                          self.context.variables.insert(element_name.clone(), Type::Field(LinearityKind::Linear));
+                          self.context.variables.insert(element_name.clone(), Type::Field);
                           
                           // For simplicity, create a constraint that this element equals zero
                           // A full implementation would need proper tuple handling

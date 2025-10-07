@@ -3,14 +3,14 @@ use std::fmt;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
     // Core types
-    Field(LinearityKind),
+    Field,
     Bits(Box<Expression>),
     Array {
       element_type: Box<Type>,
       size: usize,
     },
     Nat,
-    Bool(LinearityKind),
+    Bool,
     
     // Type abstractions
     Custom(String),
@@ -28,25 +28,25 @@ pub enum Type {
     Tuple(Vec<Type>),
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum LinearityKind {
-    Linear,
-    Copyable,  
-    Consumed,
-}
+
+// #[derive(Debug, Clone, PartialEq)]
+// pub enum ConstraintEffect {
+//   Unconstrained,
+//   Constrained,
+// }
 
 impl fmt::Display for Type {
   fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
     match self {
-      Type::Field(LinearityKind::Linear) => write!(f, "field^linear"),
-      Type::Field(LinearityKind::Copyable) => write!(f, "field^copyable"),
-      Type::Field(LinearityKind::Consumed) => write!(f, "field^consumed"),
+      // Type::Field(ConstraintEffect::Constrained) => write!(f, "field^constrained"),
+      // Type::Field => write!(f, "field^unconstrained"),
+      Type::Field => write!(f, "field"),
       Type::Bits(size) => write!(f, "Bits<{:?}>", size),
       Type::Array { element_type, size } => write!(f, "Array<{}, {}>", element_type, size),
       Type::Nat => write!(f, "Nat"),
-      Type::Bool(LinearityKind::Linear) => write!(f, "Bool^linear"),
-      Type::Bool(LinearityKind::Copyable) => write!(f, "Bool^copyable"),
-      Type::Bool(LinearityKind::Consumed) => write!(f, "Bool^consumed"),
+      Type::Bool => write!(f, "Bool"),
+      // Type::Bool(ConstraintEffect::Constrained) => write!(f, "Bool^constrained"),
+      // Type::Bool(ConstraintEffect::Unconstrained) => write!(f, "Bool^unconstrained"),
       Type::Custom(name) => write!(f, "{}", name),
       Type::GenericType(name) => write!(f, "{}", name),
       Type::Unit => write!(f, "()"),
@@ -110,7 +110,6 @@ pub enum Expression {
     },
     Tuple(Vec<Expression>),
     Assert(Box<Expression>),
-    Dup(Box<Expression>)
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -90,29 +90,6 @@ fn test_parse_proof_with_binary_operations() {
 }
 
 #[test]
-fn test_parse_proof_with_dup() {
-    let source = r#"
-    proof DupTest {
-        input x: Field;
-        output result: Field;
-        let x_copy = dup(x) in
-        let a = x_copy * 2 in
-        let b = x_copy * 3 in
-        assert result === a + b;
-    }"#;
-    
-    let result = parse_source(source).unwrap();
-    assert_eq!(result.len(), 1);
-    
-    match &result[0] {
-        Expression::Proof { name, .. } => {
-            assert_eq!(name, "DupTest");
-        }
-        _ => panic!("Expected Proof, got {:?}", result[0]),
-    }
-}
-
-#[test]
 fn test_parse_function_definition() {
     let source = r#"
 let square (x: Field): Field = x * x

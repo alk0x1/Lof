@@ -1,4 +1,4 @@
-use crate::ast::{Expression, Operator, Pattern, Type, LinearityKind};
+use crate::ast::{Expression, Operator, Pattern, Type};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
@@ -10,18 +10,11 @@ pub struct TypeChecker {
 pub enum TypeError {
     UndefinedVariable(String),
     UndefinedFunction(String),
-    VariableAlreadyConsumed(String),
     UndefinedType(String),
     TypeMismatch { expected: Type, found: Type },
     ArgumentCountMismatch { expected: usize, found: usize },
     PatternMismatch { expected: Type, found: Pattern },
     NonBooleanInAssert(Type),
-    VariableAlreadyConsumedAt { 
-        name: String, 
-        first_use_line: Option<usize>,
-        second_use_line: Option<usize> 
-    },
-    InvalidDup(Type),
     EmptyMatchExpression,
     DuplicatePatternVariable(String),
     InvalidExpression
@@ -31,10 +24,8 @@ impl fmt::Display for TypeError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             TypeError::UndefinedVariable(name) => write!(f, "Undefined variable: {}", name),
-            TypeError::VariableAlreadyConsumed(name) => write!(f, "Variable '{}' has already been consumed", name),
             TypeError::UndefinedFunction(name) => write!(f, "Undefined function: {}", name),
             TypeError::UndefinedType(name) => write!(f, "Undefined type: {}", name),
-            TypeError::InvalidDup(typ) => write!(f, "Cannot dup type: {}", typ),
             TypeError::TypeMismatch { expected, found } => {
                 write!(f, "Type mismatch: expected {}, found {}", expected, found)
             }
@@ -58,15 +49,6 @@ impl fmt::Display for TypeError {
             TypeError::NonBooleanInAssert(found) => {
                 write!(f, "Assertion requires a boolean condition, found {}", found)
             }
-            TypeError::VariableAlreadyConsumedAt { name, first_use_line, second_use_line } => {
-                match (first_use_line, second_use_line) {
-                    (Some(first), Some(second)) => write!(f, "Variable '{}' already consumed at line {}, cannot use again at line {}", name, first, second),
-                    (Some(first), None) => write!(f, "Variable '{}' already consumed at line {}, cannot use again", name, first),
-                    (None, Some(second)) => write!(f, "Variable '{}' already consumed, attempted reuse at line {}", name, second),
-                    (None, None) => write!(f, "Variable '{}' has already been consumed", name),
-                }
-            }
-            
         }
     }
 }
@@ -83,19 +65,13 @@ impl TypeChecker {
             .cloned()
             .ok_or_else(|| TypeError::UndefinedVariable(name.to_string()))?;
         
-        
-        match &var_type {
-            Type::Field(LinearityKind::Consumed) | Type::Bool(LinearityKind::Consumed) => {
-                Err(TypeError::VariableAlreadyConsumed(name.to_string()))
-            }
-            _ => Ok(var_type)
-        }
+        Ok(var_type)
     }
 
     fn check_pattern_compatibility(&self, pattern: &Pattern, typ: &Type) -> Result<(), TypeError> {
         match (pattern, typ) {
             (Pattern::Variable(_), _) | (Pattern::Wildcard, _) => Ok(()),
-            (Pattern::Literal(_), Type::Field(_)) => Ok(()),
+            (Pattern::Literal(_), Type::Field) => Ok(()),
             (Pattern::Tuple(patterns), Type::Tuple(types)) => {
                 if patterns.len() != types.len() {
                     return Err(TypeError::PatternMismatch { expected: typ.clone(), found: pattern.clone() });
@@ -130,69 +106,9 @@ impl TypeChecker {
     }
     
     fn types_compatible(&self, type1: &Type, type2: &Type) -> bool {
-        match (type1, type2) {
-            (Type::Field(_), Type::Field(_)) => true,
-            (Type::Bool(_), Type::Bool(_)) => true,
-            _ => type1 == type2,
-        }
+        type1 == type2
     }
     
-    fn consume_variable(&mut self, name: &str) -> Result<Type, TypeError> {
-        let var_type = self.symbols.get(name)
-            .cloned()
-            .ok_or_else(|| TypeError::UndefinedVariable(name.to_string()))?;
-        
-        
-        match &var_type {
-            Type::Field(LinearityKind::Consumed) | Type::Bool(LinearityKind::Consumed) => {
-                return Err(TypeError::VariableAlreadyConsumed(name.to_string()));
-            }
-            _ => {}
-        }
-        
-        match &var_type {
-            Type::Field(LinearityKind::Linear) => {
-                self.symbols.insert(name.to_string(), Type::Field(LinearityKind::Consumed));
-            }
-            Type::Bool(LinearityKind::Linear) => {
-                self.symbols.insert(name.to_string(), Type::Bool(LinearityKind::Consumed));
-            }
-            _ => {
-            }
-        }
-        
-        Ok(var_type)
-    }
-    
-    fn access_variable(&mut self, name: &str, consume: bool) -> Result<Type, TypeError> {
-        if consume {
-            self.consume_variable(name)
-        } else {
-            self.read_variable(name)
-        }
-    }
-    
-    fn consume_variables_in_expression(&mut self, expr: &Expression) -> Result<(), TypeError> {
-        match expr {
-            Expression::Variable(name) => {
-                self.consume_variable(name)?;
-                Ok(())
-            }
-            Expression::BinaryOp { left, right, .. } => {
-                self.consume_variables_in_expression(left)?;
-                self.consume_variables_in_expression(right)?;
-                Ok(())
-            }
-            Expression::Tuple(elements) => {
-                for elem in elements {
-                    self.consume_variables_in_expression(elem)?;
-                }
-                Ok(())
-            }
-            _ => Ok(()),
-        }
-    }
-
     pub fn check_program(&mut self, program: &[Expression]) -> Result<(), TypeError> {
         for expr in program {
             if let Expression::FunctionDef { name, params, return_type, .. } = expr {
@@ -242,8 +158,7 @@ impl TypeChecker {
             return Ok(function_type);
         }
     
-        for arg_expr in arguments {
-            
+        for _ in arguments {
             match function_type {
                 Type::Function { params, return_type } => {
                     if params.len() != 1 {
@@ -253,11 +168,6 @@ impl TypeChecker {
                         });
                     }
                     
-                    let arg_type = self.check_expression(arg_expr)?;
-                    
-                    if let Expression::Variable(var_name) = arg_expr {
-                        self.consume_variable(var_name)?;
-                    }
                     
                     function_type = *return_type;
                 }
@@ -275,7 +185,7 @@ impl TypeChecker {
     
     pub fn check_expression(&mut self, expr: &Expression) -> Result<Type, TypeError> {
         match expr {
-            Expression::Number(_) => Ok(Type::Field(LinearityKind::Copyable)),
+            Expression::Number(_) => Ok(Type::Field),
             Expression::Variable(name) => {
                 self.read_variable(name)
             }
@@ -315,10 +225,8 @@ impl TypeChecker {
                 let left_type = self.check_expression(left)?;
                 let right_type = self.check_expression(right)?;
                 
-                let left_name = if let Expression::Variable(name) = left.as_ref() { Some(name) } else { None };
-                let right_name = if let Expression::Variable(name) = right.as_ref() { Some(name) } else { None };
                 
-                self.check_operator(op, &left_type, &right_type, left_name, right_name)
+                self.check_operator(op, &left_type, &right_type)
             }
             Expression::Tuple(elements) => {
                 let types = elements
@@ -329,14 +237,14 @@ impl TypeChecker {
             }
             Expression::Assert(condition) => {
                 let cond_type = self.check_expression(condition)?;
-                if cond_type != Type::Bool(LinearityKind::Linear) && cond_type != Type::Bool(LinearityKind::Copyable) {
+                if cond_type != Type::Bool {
                     return Err(TypeError::NonBooleanInAssert(cond_type));
                 }
                 Ok(Type::Unit)
             }
             Expression::FunctionDef { name, body, params, return_type } => {
                 let original_symbols = self.symbols.clone();
-                
+
                 for param in params.iter() {
                     let resolved_param_type = self.resolve_type(&param.typ)?;
                     self.symbols.insert(param.name.clone(), resolved_param_type);
@@ -347,13 +255,7 @@ impl TypeChecker {
                 
                 let expected_return_type = self.resolve_type(return_type)?;
                 
-                let return_types_compatible = match (&body_type, &expected_return_type) {
-                    (Type::Field(LinearityKind::Copyable), Type::Field(LinearityKind::Linear)) => true,
-                    (Type::Field(LinearityKind::Linear), Type::Field(LinearityKind::Linear)) => true,
-                    _ => body_type == expected_return_type,
-                };
-                
-                if !return_types_compatible {
+                if body_type != expected_return_type {
                     return Err(TypeError::TypeMismatch {
                         expected: expected_return_type,
                         found: body_type,
@@ -368,38 +270,18 @@ impl TypeChecker {
                 
                 self.apply_function(function_type, arguments)
             }
-            Expression::Dup(expr) => {
-                let arg_type = self.check_expression(expr)?;
-                
-                match arg_type {
-                    Type::Field(LinearityKind::Linear) => Ok(Type::Field(LinearityKind::Copyable)),
-                    Type::Bool(LinearityKind::Linear) => Ok(Type::Bool(LinearityKind::Copyable)),
-                    Type::Field(LinearityKind::Copyable) | Type::Bool(LinearityKind::Copyable) => {
-                        Err(TypeError::InvalidDup(arg_type))
-                    }
-                    Type::Field(LinearityKind::Consumed) | Type::Bool(LinearityKind::Consumed) => {
-                        Err(TypeError::VariableAlreadyConsumed("argument to dup".to_string()))
-                    }
-                    _ => {
-                        Err(TypeError::TypeMismatch {
-                            expected: Type::Field(LinearityKind::Linear),
-                            found: arg_type,
-                        })
-                    }
-                }
-            }
             Expression::Proof { signals, body, .. } => {
                 for signal in signals {
                     let resolved_type = self.resolve_type(&signal.typ)?;
                     self.symbols.insert(signal.name.clone(), resolved_type);
                 }
-                
+            
                 let _body_type = self.check_expression(body)?;
-                
+            
+            
                 Ok(Type::Unit)
             }
             Expression::Block { statements, final_expr } => {
-                let original_symbols = self.symbols.clone();
                 for stmt in statements {
                     self.check_expression(stmt)?;
                 }
@@ -409,26 +291,6 @@ impl TypeChecker {
                     Type::Unit
                 };
                 
-                // Preserve consumed variable states while restoring variable bindings
-                let final_symbols = self.symbols.clone();
-                self.symbols = original_symbols;
-                
-                // Update consumed variables from the block
-                for (name, final_type) in final_symbols {
-                    if let Some(original_type) = self.symbols.get(&name) {
-                        match (&original_type, &final_type) {
-                            // If a variable was consumed in the block, keep it consumed
-                            (Type::Field(LinearityKind::Linear), Type::Field(LinearityKind::Consumed)) => {
-                                self.symbols.insert(name, final_type);
-                            }
-                            (Type::Bool(LinearityKind::Linear), Type::Bool(LinearityKind::Consumed)) => {
-                                self.symbols.insert(name, final_type);
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                
                 Ok(result_type)
             }
             Expression::Match { value, patterns } => {
@@ -437,7 +299,6 @@ impl TypeChecker {
                 }
                 
                 let scrutinee_type = self.check_expression(value)?;
-                self.consume_variables_in_expression(value)?;
                 
                 let mut arm_types = Vec::new();
                 
@@ -474,8 +335,8 @@ impl TypeChecker {
     fn resolve_type(&self, typ: &Type) -> Result<Type, TypeError> {
         match typ {
             Type::Identifier(name) => match name.as_str() {
-                "field" => Ok(Type::Field(LinearityKind::Linear)),
-                "bool" => Ok(Type::Bool(LinearityKind::Linear)),
+                "field" => Ok(Type::Field),
+                "bool" => Ok(Type::Bool),
                 "unit" => Ok(Type::Unit),
                 _ => Err(TypeError::UndefinedType(name.clone())),
             },
@@ -510,85 +371,55 @@ impl TypeChecker {
         }
     }
 
-    fn check_operator(&mut self, op: &Operator, left: &Type, right: &Type, left_name: Option<&String>, right_name: Option<&String>) -> Result<Type, TypeError> {
+    fn check_operator(&mut self, op: &Operator, left: &Type, right: &Type) -> Result<Type, TypeError> {
         match op {
             Operator::Add | Operator::Sub | Operator::Mul | Operator::Div => {
-                if let Some(name) = left_name {
-                    self.consume_variable(name)?;
-                }
-                if let Some(name) = right_name {
-                    self.consume_variable(name)?;
-                }
-            }
-            Operator::Equal | Operator::NotEqual | Operator::Lt | Operator::Gt | Operator::Le | Operator::Ge => {
-            }
-            Operator::And | Operator::Or => {
-                if let Some(name) = left_name {
-                    self.consume_variable(name)?;
-                }
-                if let Some(name) = right_name {
-                    self.consume_variable(name)?;
-                }
-            }
-            Operator::Assert => {}
-        }
-        
-        match op {
-            Operator::Add | Operator::Sub | Operator::Mul | Operator::Div => {
-                let left_is_field = matches!(left, Type::Field(LinearityKind::Linear) | Type::Field(LinearityKind::Copyable));
-                let right_is_field = matches!(right, Type::Field(LinearityKind::Linear) | Type::Field(LinearityKind::Copyable));
+                let left_is_field = matches!(left, Type::Field);
+                let right_is_field = matches!(right, Type::Field);
                 
                 if left_is_field && right_is_field {
-                    Ok(Type::Field(LinearityKind::Linear))
+                    Ok(Type::Field)
                 } else {
                     Err(TypeError::TypeMismatch { 
-                        expected: Type::Field(LinearityKind::Linear), 
+                        expected: Type::Field, 
                         found: if !left_is_field { left.clone() } else { right.clone() } 
                     })
                 }
             }
     
             Operator::Equal | Operator::NotEqual => {
-                let types_compatible = match (left, right) {
-                    (Type::Field(LinearityKind::Linear), Type::Field(LinearityKind::Linear)) => true,
-                    (Type::Field(LinearityKind::Linear), Type::Field(LinearityKind::Copyable)) => true,
-                    (Type::Field(LinearityKind::Copyable), Type::Field(LinearityKind::Linear)) => true,
-                    (Type::Field(LinearityKind::Copyable), Type::Field(LinearityKind::Copyable)) => true,
-                    _ => left == right,
-                };
-                
-                if types_compatible {
-                    Ok(Type::Bool(LinearityKind::Linear))
+                if left == right {
+                    Ok(Type::Bool)
                 } else {
                     Err(TypeError::TypeMismatch { expected: left.clone(), found: right.clone() })
                 }
             }
     
             Operator::Lt | Operator::Gt | Operator::Le | Operator::Ge => {
-                let left_is_field = matches!(left, Type::Field(LinearityKind::Linear) | Type::Field(LinearityKind::Copyable));
-                let right_is_field = matches!(right, Type::Field(LinearityKind::Linear) | Type::Field(LinearityKind::Copyable));
+                let left_is_field = matches!(left, Type::Field);
+                let right_is_field = matches!(right, Type::Field);
                 
                 if left_is_field && right_is_field {
-                    Ok(Type::Bool(LinearityKind::Linear))
+                    Ok(Type::Bool)
                 } else {
                     Err(TypeError::TypeMismatch { 
-                        expected: Type::Field(LinearityKind::Linear), 
+                        expected: Type::Field, 
                         found: if !left_is_field { left.clone() } else { right.clone() } 
                     })
                 }
             }
             
             Operator::And | Operator::Or => {
-                if *left == Type::Bool(LinearityKind::Linear) && *right == Type::Bool(LinearityKind::Linear) {
-                    Ok(Type::Bool(LinearityKind::Linear))
+                if *left == Type::Bool && *right == Type::Bool {
+                    Ok(Type::Bool)
                 } else {
-                    Err(TypeError::TypeMismatch { expected: Type::Bool(LinearityKind::Linear), found: if *left != Type::Bool(LinearityKind::Linear) { left.clone() } else { right.clone() } })
+                    Err(TypeError::TypeMismatch { expected: Type::Bool, found: if *left != Type::Bool { left.clone() } else { right.clone() } })
                 }
             }
             
             Operator::Assert => {
                 if self.types_compatible(left, right) {
-                    Ok(Type::Bool(LinearityKind::Linear))
+                    Ok(Type::Bool)
                 } else {
                     Err(TypeError::TypeMismatch { expected: left.clone(), found: right.clone() })
                 }

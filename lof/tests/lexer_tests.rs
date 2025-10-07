@@ -62,17 +62,6 @@ fn test_numbers() {
     assert_eq!(lexer.next_token(), Token::Number(999));
 }
 
-#[test]
-fn test_keywords() {
-    let mut lexer = Lexer::new("input witness output Field Bool assert dup");
-    assert_eq!(lexer.next_token(), Token::Keyword(Keyword::Input));
-    assert_eq!(lexer.next_token(), Token::Keyword(Keyword::Witness));
-    assert_eq!(lexer.next_token(), Token::Keyword(Keyword::Output));
-    assert_eq!(lexer.next_token(), Token::Keyword(Keyword::Field));
-    assert_eq!(lexer.next_token(), Token::Keyword(Keyword::Bool));
-    assert_eq!(lexer.next_token(), Token::Keyword(Keyword::Assert));
-    assert_eq!(lexer.next_token(), Token::Keyword(Keyword::Dup));
-}
 
 #[test]
 fn test_comments() {
