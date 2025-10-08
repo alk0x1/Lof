@@ -7,7 +7,25 @@ CIRCUIT_NAME=${1:-multiply}
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 OUTPUTS_DIR="$PROJECT_ROOT/outputs"
-TEST_CASES_FILE="$PROJECT_ROOT/test_cases/01_basic/${CIRCUIT_NAME}_tests.json"
+
+# Find the test cases file in any category directory
+TEST_CASES_FILE=""
+for category_dir in "$PROJECT_ROOT/test_cases"/*; do
+    if [ -d "$category_dir" ]; then
+        if [ -f "$category_dir/${CIRCUIT_NAME}_tests.json" ]; then
+            TEST_CASES_FILE="$category_dir/${CIRCUIT_NAME}_tests.json"
+            break
+        fi
+    fi
+done
+
+if [ -z "$TEST_CASES_FILE" ]; then
+    echo "FAILED: Test cases file not found for circuit: $CIRCUIT_NAME"
+    echo "Looked in: $PROJECT_ROOT/test_cases/*/
+    exit 1
+fi
+
+echo "Using test cases: $TEST_CASES_FILE"
 
 echo "Generating witnesses for $CIRCUIT_NAME circuit..."
 
@@ -22,7 +40,7 @@ mkdir -p "$OUTPUTS_DIR/circom/witnesses"
 mkdir -p "$OUTPUTS_DIR/lof/witnesses"
 
 # Extract test vectors from JSON (using python for JSON parsing)
-python3 -c "
+python3 << EOF > "$OUTPUTS_DIR/input_files.txt"
 import json
 import sys
 
@@ -33,7 +51,7 @@ for i, test_vector in enumerate(data['test_vectors']):
     with open('$OUTPUTS_DIR/test_input_{}.json'.format(i), 'w') as out:
         json.dump(test_vector['inputs'], out)
     print('test_input_{}.json'.format(i))
-" > "$OUTPUTS_DIR/input_files.txt"
+EOF
 
 # Generate witnesses for each test case
 while read -r input_file; do

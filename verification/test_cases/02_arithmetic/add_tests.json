@@ -1,0 +1,30 @@
+{
+  "circuit_name": "add",
+  "description": "Addition circuit: a + b = c",
+  "test_vectors": [
+    {
+      "name": "basic_add",
+      "inputs": {"a": "10", "b": "20"},
+      "expected_outputs": {"c": "30"}
+    },
+    {
+      "name": "zero_add",
+      "inputs": {"a": "0", "b": "42"},
+      "expected_outputs": {"c": "42"}
+    },
+    {
+      "name": "negative_like",
+      "inputs": {"a": "21888242871839275222246405745257275088548364400416034343698204186575808495616", "b": "1"},
+      "expected_outputs": {"c": "0"}
+    },
+    {
+      "name": "large_numbers",
+      "inputs": {"a": "123456789", "b": "987654321"},
+      "expected_outputs": {"c": "1111111110"}
+    }
+  ],
+  "validation_rules": {
+    "max_constraint_ratio": 1.5,
+    "require_exact_outputs": true
+  }
+}

@@ -1,0 +1,152 @@
+name: Tier 2 - Integration Tests
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [master, v1-stable-release]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  parser-tests:
+    name: Parser Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build CLI
+        run: cargo build --release --bin lof
+
+      - name: Install CLI globally
+        run: |
+          sudo cp target/release/lof /usr/local/bin/
+          lof --version
+
+      - name: Run parser tests
+        run: |
+          cd tests/scripts
+          ./runparsertests.sh
+
+  typechecker-tests:
+    name: Typechecker Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build CLI
+        run: cargo build --release --bin lof
+
+      - name: Install CLI globally
+        run: |
+          sudo cp target/release/lof /usr/local/bin/
+          lof --version
+
+      - name: Run typechecker tests
+        run: |
+          cd tests/scripts
+          ./runtypecheckertests.sh
+
+  compiler-tests:
+    name: R1CS Compiler Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build CLI
+        run: cargo build --release --bin lof
+
+      - name: Install CLI globally
+        run: |
+          sudo cp target/release/lof /usr/local/bin/
+          lof --version
+
+      - name: Run compilation tests
+        run: |
+          cd tests/scripts
+          ./runcompiletests.sh
+
+      - name: Upload R1CS artifacts
+        if: success()
+        uses: actions/upload-artifact@v3
+        with:
+          name: r1cs-outputs
+          path: /tmp/lof-test-*/*.r1cs
+          retention-days: 3
+          if-no-files-found: ignore
+
+  integration-summary:
+    name: Integration Tests Summary
+    runs-on: ubuntu-latest
+    needs: [parser-tests, typechecker-tests, compiler-tests]
+    if: always()
+
+    steps:
+      - name: Check results
+        run: |
+          echo "Integration Test Results:"
+          echo "========================="
+          echo "Parser Tests: ${{ needs.parser-tests.result }}"
+          echo "Typechecker Tests: ${{ needs.typechecker-tests.result }}"
+          echo "Compiler Tests: ${{ needs.compiler-tests.result }}"
+
+          if [ "${{ needs.parser-tests.result }}" != "success" ] || \
+             [ "${{ needs.typechecker-tests.result }}" != "success" ] || \
+             [ "${{ needs.compiler-tests.result }}" != "success" ]; then
+            echo "Some integration tests failed!"
+            exit 1
+          fi
+
+          echo "All integration tests passed!"

@@ -1,0 +1,30 @@
+{
+  "circuit_name": "simple_let",
+  "description": "Simple let binding: let temp = a + b in temp * a",
+  "test_vectors": [
+    {
+      "name": "basic_let",
+      "inputs": {"a": "3", "b": "4"},
+      "expected_outputs": {"result": "21"}
+    },
+    {
+      "name": "zero_input",
+      "inputs": {"a": "0", "b": "5"},
+      "expected_outputs": {"result": "0"}
+    },
+    {
+      "name": "identity",
+      "inputs": {"a": "1", "b": "0"},
+      "expected_outputs": {"result": "1"}
+    },
+    {
+      "name": "large_computation",
+      "inputs": {"a": "100", "b": "200"},
+      "expected_outputs": {"result": "30000"}
+    }
+  ],
+  "validation_rules": {
+    "max_constraint_ratio": 2.0,
+    "require_exact_outputs": true
+  }
+}

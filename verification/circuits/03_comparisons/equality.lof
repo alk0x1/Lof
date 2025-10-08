@@ -1,0 +1,7 @@
+proof Equality {
+    input a: field;
+    input b: field;
+    witness result: field;
+    
+    assert a === b
+}

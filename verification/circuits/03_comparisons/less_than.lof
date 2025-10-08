@@ -1,0 +1,8 @@
+proof LessThan {
+    input a: field;
+    input b: field;
+    witness result: field;
+    
+    let is_less = a < b in
+    assert is_less === result
+}

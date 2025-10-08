@@ -1,0 +1,9 @@
+proof SimpleLet {
+    input a: field;
+    input b: field;
+    witness result: field;
+    
+    let temp = a + b in
+    let final = temp * a in
+    assert final === result
+}

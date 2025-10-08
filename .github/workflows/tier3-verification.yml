@@ -1,0 +1,166 @@
+name: Tier 3 - Circom Verification
+
+on:
+  pull_request:
+    branches: [master, v1-stable-release]
+  workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * *'  # Run nightly at 2 AM UTC
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  circom-verification:
+    name: Mathematical Equivalence Verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build Lof CLI
+        run: cargo build --release --bin lof
+
+      - name: Install Lof CLI
+        run: |
+          sudo cp target/release/lof /usr/local/bin/
+          lof --version
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install Circom
+        run: |
+          git clone https://github.com/iden3/circom.git /tmp/circom
+          cd /tmp/circom
+          cargo build --release
+          sudo cp target/release/circom /usr/local/bin/
+          circom --version
+
+      - name: Install snarkjs
+        run: |
+          npm install -g snarkjs
+          snarkjs --version
+
+      - name: Cache verification outputs
+        uses: actions/cache@v3
+        with:
+          path: verification/outputs/
+          key: verification-${{ hashFiles('verification/circuits/**/*.lof', 'verification/circuits/**/*.circom') }}
+
+      - name: Run basic verification tests
+        run: |
+          cd verification/circuits/01_basic
+          bash ../../scripts/compile_both.sh multiply
+          bash ../../scripts/generate_witnesses.sh multiply
+          python3 ../../scripts/compare_results.py multiply
+
+      - name: Run arithmetic verification tests
+        run: |
+          cd verification/scripts
+          ./compile_both.sh add
+          ./generate_witnesses.sh add
+          python3 compare_results.py add
+
+      - name: Run full verification suite
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        run: |
+          cd verification/scripts
+          ./run_all_verification.sh
+
+      - name: Upload verification results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: verification-outputs
+          path: verification/outputs/
+          retention-days: 14
+
+      - name: Generate verification report
+        if: always()
+        run: |
+          echo "# Verification Report" > verification-report.md
+          echo "" >> verification-report.md
+          echo "## Test Categories" >> verification-report.md
+          for category in verification/circuits/*/; do
+            category_name=$(basename "$category")
+            echo "- $category_name" >> verification-report.md
+          done
+          cat verification-report.md
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: verification-report
+          path: verification-report.md
+
+  verification-smoke-test:
+    name: Quick Verification Smoke Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Build and install Lof
+        run: |
+          cargo build --release --bin lof
+          sudo cp target/release/lof /usr/local/bin/
+
+      - name: Setup Node.js and Circom
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install Circom (from pre-built)
+        run: |
+          wget https://github.com/iden3/circom/releases/download/v2.1.6/circom-linux-amd64
+          chmod +x circom-linux-amd64
+          sudo mv circom-linux-amd64 /usr/local/bin/circom
+          circom --version
+
+      - name: Install snarkjs
+        run: npm install -g snarkjs
+
+      - name: Run smoke test (basic multiply)
+        run: |
+          cd verification/circuits/01_basic
+          bash ../../scripts/compile_both.sh multiply
+          ls -lh ../../../verification/outputs/lof/multiply.r1cs
+          ls -lh ../../../verification/outputs/circom/multiply.r1cs
+
+      - name: Verify R1CS files were generated
+        run: |
+          if [ ! -f "verification/outputs/lof/multiply.r1cs" ]; then
+            echo "Lof R1CS file not found!"
+            exit 1
+          fi
+          if [ ! -f "verification/outputs/circom/multiply.r1cs" ]; then
+            echo "Circom R1CS file not found!"
+            exit 1
+          fi
+          echo "Both R1CS files generated successfully!"

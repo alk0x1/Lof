@@ -6,8 +6,26 @@
 CIRCUIT_NAME=${1:-multiply}
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-CIRCUITS_DIR="$PROJECT_ROOT/circuits/01_basic"
 OUTPUTS_DIR="$PROJECT_ROOT/outputs"
+
+# Find the circuit in any category directory
+CIRCUIT_FILE=""
+for category_dir in "$PROJECT_ROOT/circuits"/*; do
+    if [ -d "$category_dir" ]; then
+        if [ -f "$category_dir/$CIRCUIT_NAME.lof" ]; then
+            CIRCUITS_DIR="$category_dir"
+            CIRCUIT_FILE="$category_dir/$CIRCUIT_NAME.lof"
+            break
+        fi
+    fi
+done
+
+if [ -z "$CIRCUIT_FILE" ]; then
+    echo "Error: Circuit '$CIRCUIT_NAME' not found in any category"
+    exit 1
+fi
+
+echo "Found circuit in: $CIRCUITS_DIR"
 
 echo "Compiling $CIRCUIT_NAME circuit in both languages..."
 

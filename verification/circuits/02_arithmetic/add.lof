@@ -1,0 +1,8 @@
+proof Add {
+    input a: field;
+    input b: field;
+    witness c: field;
+    
+    let sum = a + b in
+    assert sum === c
+}

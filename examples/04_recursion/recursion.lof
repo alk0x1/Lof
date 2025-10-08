@@ -1,0 +1,14 @@
+// Define the Fibonacci function with recursion depth limit of 8
+rec[8] fib : (Field) -> Field
+fib 0 = 0
+fib 1 = 1
+fib n = fib(n-1) + fib(n-2)
+
+// Proof that tests Fibonacci
+proof FibTest {
+  input n: Field;
+  output result: Field;
+  
+  // This will only work for n ≤ 8 due to the recursion depth limit
+  assert result === fib(n);
+}

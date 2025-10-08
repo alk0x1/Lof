@@ -1,0 +1,10 @@
+proof CompoundOps {
+    input a: field;
+    input b: field;
+    input c: field;
+    input d: field;
+    witness result: field;
+    
+    let expr = a * b + c * d in
+    assert expr === result
+}

@@ -1,0 +1,8 @@
+proof Subtract {
+    input a: field;
+    input b: field;
+    witness c: field;
+    
+    let diff = a - b in
+    assert diff === c
+}

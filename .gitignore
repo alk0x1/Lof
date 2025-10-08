@@ -1,7 +1,4 @@
 target
-user_test
-examples
-features
 *.lock
 zk_verification
 *.lock
@@ -14,6 +11,16 @@ verification/outputs/
 
 # Documentation
 docs/
+
+# Examples build artifacts (keep .lof files, ignore generated files)
+examples/*/*.r1cs
+examples/*/*.bin
+examples/*/*.json
+examples/*/build/
+examples/*/keys/
+examples/*/proofs/
+examples/*/inputs/
+examples/*/output
 
 # ZK proof generated files
 *.r1cs
@@ -28,4 +35,8 @@ full_witness.json
 *.js
 
 # User test outputs
-user_test/
+
+# Code coverage reports
+coverage/
+cobertura.xml
+tarpaulin-report.html

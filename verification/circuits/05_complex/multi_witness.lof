@@ -1,0 +1,14 @@
+proof MultiWitness {
+    input a: field;
+    input b: field;
+    witness x: field;
+    witness y: field;
+    witness z: field;
+    
+    let sum = a + b in
+    let product = a * b in
+    let diff = a - b in
+    assert sum === x,
+    assert product === y,
+    assert diff === z
+}

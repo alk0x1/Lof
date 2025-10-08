@@ -1,0 +1,7 @@
+// SHOULD_FAIL
+proof TestDoubleUsage {
+    input x: field;
+    let y = x + 1 in
+    let z = x + 2 in
+    z
+}

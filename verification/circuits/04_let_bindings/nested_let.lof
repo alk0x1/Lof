@@ -1,0 +1,11 @@
+proof NestedLet {
+    input a: field;
+    input b: field;
+    input c: field;
+    witness result: field;
+    
+    let x = a + b in
+    let y = x * c in
+    let z = y - a in
+    assert z === result
+}

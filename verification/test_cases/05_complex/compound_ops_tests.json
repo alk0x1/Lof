@@ -1,0 +1,30 @@
+{
+  "circuit_name": "compound_ops",
+  "description": "Compound operations: a * b + c * d",
+  "test_vectors": [
+    {
+      "name": "basic_compound",
+      "inputs": {"a": "2", "b": "3", "c": "4", "d": "5"},
+      "expected_outputs": {"result": "26"}
+    },
+    {
+      "name": "zero_terms",
+      "inputs": {"a": "0", "b": "10", "c": "5", "d": "6"},
+      "expected_outputs": {"result": "30"}
+    },
+    {
+      "name": "identity_terms",
+      "inputs": {"a": "1", "b": "7", "c": "1", "d": "3"},
+      "expected_outputs": {"result": "10"}
+    },
+    {
+      "name": "large_computation",
+      "inputs": {"a": "123", "b": "456", "c": "789", "d": "101"},
+      "expected_outputs": {"result": "135777"}
+    }
+  ],
+  "validation_rules": {
+    "max_constraint_ratio": 3.0,
+    "require_exact_outputs": true
+  }
+}

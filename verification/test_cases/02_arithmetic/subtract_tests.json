@@ -1,0 +1,30 @@
+{
+  "circuit_name": "subtract",
+  "description": "Subtraction circuit: a - b = c",
+  "test_vectors": [
+    {
+      "name": "basic_subtract",
+      "inputs": {"a": "30", "b": "10"},
+      "expected_outputs": {"c": "20"}
+    },
+    {
+      "name": "zero_subtract",
+      "inputs": {"a": "42", "b": "0"},
+      "expected_outputs": {"c": "42"}
+    },
+    {
+      "name": "same_numbers",
+      "inputs": {"a": "100", "b": "100"},
+      "expected_outputs": {"c": "0"}
+    },
+    {
+      "name": "field_wrap",
+      "inputs": {"a": "0", "b": "1"},
+      "expected_outputs": {"c": "21888242871839275222246405745257275088548364400416034343698204186575808495616"}
+    }
+  ],
+  "validation_rules": {
+    "max_constraint_ratio": 1.5,
+    "require_exact_outputs": true
+  }
+}
