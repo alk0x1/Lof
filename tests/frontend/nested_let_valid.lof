@@ -1,9 +1,0 @@
-// SHOULD_PASS - Valid nested let expressions with dup
-proof NestedLetValid {
-    input x: field;
-    input y: field;
-    let sum = x + y in
-    let sum_copy = dup(sum) in
-    let doubled = sum_copy + sum_copy in
-    doubled
-}

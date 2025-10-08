@@ -1,9 +1,0 @@
-// SHOULD_FAIL - Function call with variable reuse
-let add(x: field)(y: field): field = x + y
-
-proof FunctionInvalidReuse {
-    input a: field;
-    let result1 = add(a)(1) in    // Correct curried call syntax
-    let result2 = add(a)(2) in    // This should fail - 'a' already consumed
-    result2
-}

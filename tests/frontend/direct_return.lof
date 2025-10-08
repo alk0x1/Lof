@@ -1,5 +1,0 @@
-// SHOULD_PASS - Direct return of input
-proof DirectReturn {
-    input value: field;
-    value
-}

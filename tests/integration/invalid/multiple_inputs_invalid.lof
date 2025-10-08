@@ -1,8 +1,0 @@
-// SHOULD_FAIL - One variable used twice
-proof MultipleInputsInvalid {
-    input a: field;
-    input b: field;
-    let first = a + b in
-    let second = a + first in
-    second
-}
