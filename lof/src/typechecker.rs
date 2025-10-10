@@ -242,7 +242,7 @@ impl TypeChecker {
                 }
                 Ok(Type::Unit)
             }
-            Expression::FunctionDef { name, body, params, return_type } => {
+            Expression::FunctionDef { name: _, body, params, return_type } => {
                 let original_symbols = self.symbols.clone();
 
                 for param in params.iter() {
@@ -416,7 +416,15 @@ impl TypeChecker {
                     Err(TypeError::TypeMismatch { expected: Type::Bool, found: if *left != Type::Bool { left.clone() } else { right.clone() } })
                 }
             }
-            
+
+            Operator::Not => {
+                if *right == Type::Bool {
+                    Ok(Type::Bool)
+                } else {
+                    Err(TypeError::TypeMismatch { expected: Type::Bool, found: right.clone() })
+                }
+            }
+
             Operator::Assert => {
                 if self.types_compatible(left, right) {
                     Ok(Type::Bool)

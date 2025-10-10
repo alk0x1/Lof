@@ -110,6 +110,10 @@ pub enum Expression {
     },
     Tuple(Vec<Expression>),
     Assert(Box<Expression>),
+    ArrayIndex {
+        array: Box<Expression>,
+        index: Box<Expression>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -174,6 +178,7 @@ pub enum Operator {
     // Logical
     And,      // &&
     Or,       // ||
+    Not,      // !
 
     // Constraint
     Assert,   // ===

@@ -53,6 +53,7 @@ impl<T: Iterator<Item = Token>> Parser<T> {
   fn parse_toplevel_declaration(&mut self) -> ParseResult<Expression> {
       match self.peek() {
           Some(Token::Keyword(Keyword::Proof)) => self.parse_proof(),
+          Some(Token::Keyword(Keyword::Component)) => self.parse_component(),
           Some(Token::Keyword(Keyword::Let)) => self.parse_function_definition(),
           Some(other) => Err(ParseError::UnexpectedToken(other.clone())),
           None => Err(ParseError::UnexpectedEOF),
@@ -293,12 +294,6 @@ impl<T: Iterator<Item = Token>> Parser<T> {
     Ok(Signal { name, visibility, typ })
   }
 
-  /// Grammar: `Type ::= "field" ("<" Expression ".." Expression ">")?
-  ///                  | "bits" "<" Expression ">"
-  ///                  | "array" "<" Type "," Expression ">"
-  ///                  | "nat" | "bool"
-  ///                  | "refined" "{" Type "," Expression "}"
-  ///                  | Identifier ("<" ...)?`
   fn parse_type(&mut self) -> ParseResult<Type> {
     let next_token = match self.peek() {
         Some(token) => token.clone(),
@@ -318,22 +313,31 @@ impl<T: Iterator<Item = Token>> Parser<T> {
             self.tokens.next();
             Ok(Type::Nat)
         }
+        Token::Keyword(Keyword::Refined) => {
+            self.tokens.next();
+            self.expect(Token::Symbol(Symbol::LBrace))?;
+            let base_type = Box::new(self.parse_type()?);
+            self.expect(Token::Symbol(Symbol::Comma))?;
+            let predicate = Box::new(self.parse_expression()?);
+            self.expect(Token::Symbol(Symbol::RBrace))?;
+            Ok(Type::Refined(base_type, predicate))
+        }
+        Token::Keyword(Keyword::Array) => {
+            self.tokens.next();
+            self.expect(Token::Symbol(Symbol::LAngle))?;
+            let element_type = Box::new(self.parse_type()?);
+            self.expect(Token::Symbol(Symbol::Comma))?;
+            let size = match self.tokens.next() {
+                Some(Token::Number(n)) => n as usize,
+                Some(other) => return Err(ParseError::UnexpectedToken(other)),
+                None => return Err(ParseError::UnexpectedEOF),
+            };
+            self.expect(Token::Symbol(Symbol::RAngle))?;
+            Ok(Type::Array { element_type, size })
+        }
         Token::Identifier(name) => {
             self.tokens.next();
-            if name == "array" {
-                self.expect(Token::Symbol(Symbol::LAngle))?;
-                let element_type = Box::new(self.parse_type()?);
-                self.expect(Token::Symbol(Symbol::Comma))?;
-                let size = match self.tokens.next() {
-                    Some(Token::Number(n)) => n as usize,
-                    Some(other) => return Err(ParseError::UnexpectedToken(other)),
-                    None => return Err(ParseError::UnexpectedEOF),
-                };
-                self.expect(Token::Symbol(Symbol::RAngle))?;
-                Ok(Type::Array { element_type, size })
-            } else {
-                Ok(Type::Identifier(name))
-            }
+            Ok(Type::Identifier(name))
         }
         Token::Symbol(Symbol::LParen) => {
             self.tokens.next();
@@ -369,37 +373,40 @@ impl<T: Iterator<Item = Token>> Parser<T> {
     }
   }
 
-  /// Grammar: `BinaryExpression ::= PrimaryExpression (Operator PrimaryExpression)*`
-  /// with operator precedence: Assert(1) < Comparison(2) < Add,Sub(3) < Mul(4)
   fn parse_binary_expression(&mut self) -> ParseResult<Expression> {
-    let mut expr_stack = vec![self.parse_primary_expression()?];
+    let mut expr_stack = vec![self.parse_unary_expression()?];
     let mut op_stack = Vec::new();
 
     while let Some(token) = self.peek() {
       let (op, precedence) = match token {
         Token::Symbol(Symbol::TripleEqual) => (Operator::Assert, 1),
-        Token::Symbol(Symbol::Equal) => (Operator::Equal, 2),
-        Token::Symbol(Symbol::NotEqual) => (Operator::NotEqual, 2),
-        Token::Symbol(Symbol::GreaterEq) => (Operator::Ge, 2),
-        Token::Symbol(Symbol::LessEq) => (Operator::Le, 2),
-        Token::Symbol(Symbol::RAngle) => (Operator::Gt, 2),
-        Token::Symbol(Symbol::LAngle) => (Operator::Lt, 2),
-        Token::Symbol(Symbol::Plus) => (Operator::Add, 3),
-        Token::Symbol(Symbol::Star) => (Operator::Mul, 4),
-        Token::Symbol(Symbol::Minus) => (Operator::Sub, 3),
+        Token::Symbol(Symbol::Or) => (Operator::Or, 2),
+        Token::Symbol(Symbol::And) => (Operator::And, 3),
+        Token::Symbol(Symbol::Equal) => (Operator::Equal, 4),
+        Token::Symbol(Symbol::NotEqual) => (Operator::NotEqual, 4),
+        Token::Symbol(Symbol::GreaterEq) => (Operator::Ge, 4),
+        Token::Symbol(Symbol::LessEq) => (Operator::Le, 4),
+        Token::Symbol(Symbol::RAngle) => (Operator::Gt, 4),
+        Token::Symbol(Symbol::LAngle) => (Operator::Lt, 4),
+        Token::Symbol(Symbol::Plus) => (Operator::Add, 5),
+        Token::Symbol(Symbol::Minus) => (Operator::Sub, 5),
+        Token::Symbol(Symbol::Star) => (Operator::Mul, 6),
+        Token::Symbol(Symbol::Slash) => (Operator::Div, 6),
         _ => break,
       };
 
       self.tokens.next();
-      
-      let right = self.parse_primary_expression()?;
+
+      let right = self.parse_unary_expression()?;
 
       while let Some(top_op) = op_stack.last() {
         let top_precedence = match top_op {
           Operator::Assert => 1,
-          Operator::Equal | Operator::NotEqual | Operator::Ge | Operator::Le | Operator::Gt | Operator::Lt => 2,
-          Operator::Add | Operator::Sub => 3,
-          Operator::Mul => 4,
+          Operator::Or => 2,
+          Operator::And => 3,
+          Operator::Equal | Operator::NotEqual | Operator::Ge | Operator::Le | Operator::Gt | Operator::Lt => 4,
+          Operator::Add | Operator::Sub => 5,
+          Operator::Mul | Operator::Div => 6,
           _ => 0,
         };
 
@@ -433,7 +440,41 @@ impl<T: Iterator<Item = Token>> Parser<T> {
     Ok(expr_stack.pop().unwrap())
   }
 
-  /// Grammar: `PrimaryExpression ::= Number | FunctionCall | Variable | Tuple | GroupedExpr | Assert | Match`
+  fn parse_unary_expression(&mut self) -> ParseResult<Expression> {
+    if let Some(Token::Symbol(Symbol::Not)) = self.peek() {
+      self.tokens.next();
+      let expr = self.parse_unary_expression()?;
+      Ok(Expression::BinaryOp {
+        left: Box::new(Expression::Number(0)),
+        op: Operator::Not,
+        right: Box::new(expr),
+      })
+    } else {
+      self.parse_postfix_expression()
+    }
+  }
+
+  fn parse_postfix_expression(&mut self) -> ParseResult<Expression> {
+    let mut expr = self.parse_primary_expression()?;
+
+    loop {
+      match self.peek() {
+        Some(Token::Symbol(Symbol::LBracket)) => {
+          self.tokens.next();
+          let index = self.parse_expression()?;
+          self.expect(Token::Symbol(Symbol::RBracket))?;
+          expr = Expression::ArrayIndex {
+            array: Box::new(expr),
+            index: Box::new(index),
+          };
+        }
+        _ => break,
+      }
+    }
+
+    Ok(expr)
+  }
+
   fn parse_primary_expression(&mut self) -> ParseResult<Expression> {
     let next_token = match self.peek() {
         Some(token) => token.clone(),
@@ -444,6 +485,9 @@ impl<T: Iterator<Item = Token>> Parser<T> {
       Token::Number(_) | Token::Identifier(_) | Token::Symbol(Symbol::LParen) => {
           self.parse_simple_primary()
       },
+      Token::Symbol(Symbol::LBrace) => {
+          self.parse_block()
+      },
       Token::Keyword(Keyword::Assert) => {
           self.tokens.next();
           let condition = self.parse_expression()?;
@@ -451,8 +495,7 @@ impl<T: Iterator<Item = Token>> Parser<T> {
       },
       Token::Keyword(Keyword::Match) => self.parse_match_expression(),
       _ => Err(ParseError::UnexpectedToken(next_token)),
-  }
-
+    }
   }
 
   fn parse_simple_primary(&mut self) -> ParseResult<Expression> {
@@ -460,25 +503,62 @@ impl<T: Iterator<Item = Token>> Parser<T> {
         Some(Token::Number(n)) => Ok(Expression::Number(n)),
         Some(Token::Identifier(name)) => {
             let mut expr = Expression::Variable(name.clone());
-            let mut arguments = Vec::new();  // Accumulate all arguments
-            
-            while self.peek() == Some(&Token::Symbol(Symbol::LParen)) {
+
+            if self.peek() == Some(&Token::Symbol(Symbol::LParen)) {
                 self.tokens.next();
-                
-                let arg = self.parse_expression()?;
-                arguments.push(arg);
-                
+
+                let mut first_call_args = Vec::new();
+
+                if self.peek() != Some(&Token::Symbol(Symbol::RParen)) {
+                    first_call_args.push(self.parse_expression()?);
+
+                    if self.peek() == Some(&Token::Symbol(Symbol::Comma)) {
+                        while self.peek() == Some(&Token::Symbol(Symbol::Comma)) {
+                            self.tokens.next();
+                            first_call_args.push(self.parse_expression()?);
+                        }
+                        self.expect(Token::Symbol(Symbol::RParen))?;
+
+                        expr = Expression::FunctionCall {
+                            function: name.clone(),
+                            arguments: first_call_args,
+                        };
+                        return Ok(expr);
+                    }
+                }
+
                 self.expect(Token::Symbol(Symbol::RParen))?;
-            }
-            
-            // If we have arguments, create a single function call with all of them
-            if !arguments.is_empty() {
+
                 expr = Expression::FunctionCall {
                     function: name.clone(),
-                    arguments,
+                    arguments: first_call_args,
                 };
+
+                while self.peek() == Some(&Token::Symbol(Symbol::LParen)) {
+                    self.tokens.next();
+                    let arg = self.parse_expression()?;
+                    self.expect(Token::Symbol(Symbol::RParen))?;
+
+                    let prev_func = if let Expression::FunctionCall { function, .. } = &expr {
+                        function.clone()
+                    } else {
+                        name.clone()
+                    };
+
+                    let mut prev_args = if let Expression::FunctionCall { arguments, .. } = expr {
+                        arguments
+                    } else {
+                        vec![]
+                    };
+                    prev_args.push(arg);
+
+                    expr = Expression::FunctionCall {
+                        function: prev_func,
+                        arguments: prev_args,
+                    };
+                }
             }
-            
+
             Ok(expr)
         },
         Some(Token::Symbol(Symbol::LParen)) => {

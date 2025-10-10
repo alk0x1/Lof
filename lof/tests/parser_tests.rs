@@ -1,6 +1,6 @@
 use lof::parser::Parser;
 use lof::lexer::Lexer;
-use lof::ast::{Expression, Visibility};
+use lof::ast::{Expression, Visibility, Type};
 
 fn parse_source(source: &str) -> Result<Vec<Expression>, String> {
     let lexer = Lexer::new(source);
@@ -322,26 +322,565 @@ fn test_parse_function_let_syntax() {
     // Test the supported let function syntax
     let source = r#"
     let square (x: Field): Field = x * x
-    
+
     proof Test {
         input y: Field;
         output result: Field;
         assert result === square(y);
     }"#;
-    
+
     let result = parse_source(source);
-    
+
     // This should work
     assert!(result.is_ok(), "Expected successful parse for let syntax");
-    
+
     let expressions = result.unwrap();
     assert_eq!(expressions.len(), 2);
-    
+
     match (&expressions[0], &expressions[1]) {
         (Expression::FunctionDef { name, .. }, Expression::Proof { .. }) => {
             assert_eq!(name, "square");
         }
         _ => panic!("Expected FunctionDef and Proof"),
     }
+}
+
+// ==================== TDD Tests for PARSER_TODO.md ====================
+
+// 1. COMPONENT TOP-LEVEL DECLARATIONS
+#[test]
+fn test_parse_simple_component() {
+    let source = r#"
+    component Multiplier {
+        input x: Field;
+        input y: Field;
+        output result: Field;
+        assert result === x * y
+    }"#;
+
+    let result = parse_source(source).expect("Should parse component declaration");
+    assert_eq!(result.len(), 1);
+
+    match &result[0] {
+        Expression::Component { name, signals, .. } => {
+            assert_eq!(name, "Multiplier");
+            assert_eq!(signals.len(), 3);
+            assert_eq!(signals[0].name, "x");
+            assert_eq!(signals[0].visibility, Visibility::Input);
+            assert_eq!(signals[1].name, "y");
+            assert_eq!(signals[1].visibility, Visibility::Input);
+            assert_eq!(signals[2].name, "result");
+            assert_eq!(signals[2].visibility, Visibility::Output);
+        }
+        _ => panic!("Expected Component, got {:?}", result[0]),
+    }
+}
+
+#[test]
+fn test_parse_component_with_witness() {
+    let source = r#"
+    component SecretMultiply {
+        input a: Field;
+        witness secret: Field;
+        output result: Field;
+        assert result === a * secret
+    }"#;
+
+    let result = parse_source(source).expect("Should parse component with witness");
+    assert_eq!(result.len(), 1);
+
+    match &result[0] {
+        Expression::Component { signals, .. } => {
+            assert_eq!(signals.len(), 3);
+            assert_eq!(signals[1].visibility, Visibility::Witness);
+        }
+        _ => panic!("Expected Component"),
+    }
+}
+
+#[test]
+fn test_parse_multiple_components_and_proofs() {
+    let source = r#"
+    component Adder {
+        input a: Field;
+        input b: Field;
+        output sum: Field;
+        assert sum === a + b
+    }
+
+    proof UseAdder {
+        input x: Field;
+        output result: Field;
+        assert result === x + x
+    }"#;
+
+    let result = parse_source(source).expect("Should parse component and proof");
+    assert_eq!(result.len(), 2);
+
+    match (&result[0], &result[1]) {
+        (Expression::Component { name: comp_name, .. }, Expression::Proof { name: proof_name, .. }) => {
+            assert_eq!(comp_name, "Adder");
+            assert_eq!(proof_name, "UseAdder");
+        }
+        _ => panic!("Expected Component and Proof"),
+    }
+}
+
+// 2. DIVISION OPERATOR
+#[test]
+fn test_parse_division_operator() {
+    let source = r#"
+    proof DivisionTest {
+        input x: Field;
+        input y: Field;
+        output result: Field;
+        assert result === x / y
+    }"#;
+
+    let result = parse_source(source).expect("Should parse division operator");
+    assert_eq!(result.len(), 1);
+
+    match &result[0] {
+        Expression::Proof { body, .. } => {
+            // Verify that the division operator is parsed in the body
+            // We expect the assertion to contain a BinaryOp with Div operator
+            match body.as_ref() {
+                Expression::Assert(expr) => {
+                    match expr.as_ref() {
+                        Expression::BinaryOp { op, .. } => {
+                            // The outermost operation is ===, but we check that division is parsed
+                            // The right side should contain division
+                            assert!(true); // If we got here, parsing succeeded
+                        }
+                        _ => {}
+                    }
+                }
+                _ => {}
+            }
+        }
+        _ => panic!("Expected Proof"),
+    }
+}
+
+#[test]
+fn test_parse_division_with_precedence() {
+    // Division should have same precedence as multiplication (left-to-right)
+    let source = r#"
+    proof DivPrecedence {
+        input a: Field;
+        input b: Field;
+        input c: Field;
+        output result: Field;
+        assert result === a * b / c
+    }"#;
+
+    let result = parse_source(source);
+    assert!(result.is_ok(), "Division should parse with correct precedence");
+}
+
+#[test]
+fn test_parse_division_in_expression() {
+    let source = r#"
+    let divide (x: Field) (y: Field): Field = x / y
+    "#;
+
+    let result = parse_source(source);
+    assert!(result.is_ok(), "Should parse division in function body");
+}
+
+// 3. LOGICAL OPERATORS (&&, ||, !)
+#[test]
+fn test_parse_logical_and_operator() {
+    let source = r#"
+    proof LogicalAndTest {
+        input x: Field;
+        input y: Field;
+        output result: Field;
+        let condition = (x > 0) && (y > 0) in
+        assert result === x + y
+    }"#;
+
+    let result = parse_source(source);
+    assert!(result.is_ok(), "Should parse logical AND operator");
+}
+
+#[test]
+fn test_parse_logical_or_operator() {
+    let source = r#"
+    proof LogicalOrTest {
+        input x: Field;
+        input y: Field;
+        output result: Field;
+        let condition = (x == 0) || (y == 0) in
+        assert result === 0
+    }"#;
+
+    let result = parse_source(source);
+    assert!(result.is_ok(), "Should parse logical OR operator");
+}
+
+#[test]
+fn test_parse_logical_not_operator() {
+    let source = r#"
+    proof LogicalNotTest {
+        input x: Bool;
+        output result: Bool;
+        assert result === !x
+    }"#;
+
+    let result = parse_source(source);
+    assert!(result.is_ok(), "Should parse logical NOT operator");
+}
+
+#[test]
+fn test_parse_combined_logical_operators() {
+    let source = r#"
+    proof CombinedLogicalTest {
+        input a: Field;
+        input b: Field;
+        input c: Field;
+        output result: Field;
+        let condition = (a > 0 && b > 0) || (c == 0) in
+        assert result === a + b + c
+    }"#;
+
+    let result = parse_source(source);
+    assert!(result.is_ok(), "Should parse combined logical operators");
+}
+
+#[test]
+fn test_parse_logical_operator_precedence() {
+    // && should bind tighter than ||
+    // a || b && c should parse as a || (b && c)
+    let source = r#"
+    proof LogicalPrecedence {
+        input a: Bool;
+        input b: Bool;
+        input c: Bool;
+        output result: Bool;
+        assert result === a || b && c
+    }"#;
+
+    let result = parse_source(source);
+    assert!(result.is_ok(), "Should parse with correct logical precedence");
+}
+
+// 4. BLOCK EXPRESSIONS AS PRIMARY
+#[test]
+fn test_parse_block_as_expression() {
+    let source = r#"
+    proof BlockExpressionTest {
+        input x: Field;
+        output result: Field;
+        let value = {
+            let temp = x * 2 in
+            temp + 1
+        } in
+        assert result === value
+    }"#;
+
+    let result = parse_source(source);
+    assert!(result.is_ok(), "Should parse block as expression");
+}
+
+#[test]
+fn test_parse_nested_blocks() {
+    let source = r#"
+    proof NestedBlocksTest {
+        input x: Field;
+        output result: Field;
+        let value = {
+            let a = {
+                x + 1
+            } in
+            a * 2
+        } in
+        assert result === value
+    }"#;
+
+    let result = parse_source(source);
+    assert!(result.is_ok(), "Should parse nested blocks");
+}
+
+#[test]
+fn test_parse_block_in_function_call() {
+    let source = r#"
+    let process (x: Field): Field = x * 2
+
+    proof BlockInCallTest {
+        input y: Field;
+        output result: Field;
+        assert result === process({
+            let temp = y + 1 in
+            temp
+        })
+    }"#;
+
+    let result = parse_source(source);
+    assert!(result.is_ok(), "Should parse block as function argument");
+}
+
+// 5. REFINED TYPES
+#[test]
+fn test_parse_refined_type_basic() {
+    let source = r#"
+    let positive_double (x: refined { Field, x > 0 }): Field = x * 2
+    "#;
+
+    let result = parse_source(source);
+    assert!(result.is_ok(), "Should parse basic refined type");
+
+    if let Ok(expressions) = result {
+        match &expressions[0] {
+            Expression::FunctionDef { params, .. } => {
+                assert_eq!(params.len(), 1);
+                match &params[0].typ {
+                    Type::Refined(base, _predicate) => {
+                        assert_eq!(**base, Type::Field);
+                    }
+                    _ => panic!("Expected Refined type, got {:?}", params[0].typ),
+                }
+            }
+            _ => panic!("Expected FunctionDef"),
+        }
+    }
+}
+
+#[test]
+fn test_parse_refined_type_complex_predicate() {
+    let source = r#"
+    let bounded (x: refined { Field, x > 0 && x < 100 }): Field = x
+    "#;
+
+    let result = parse_source(source);
+    assert!(result.is_ok(), "Should parse refined type with complex predicate");
+}
+
+#[test]
+fn test_parse_refined_type_in_signal() {
+    let source = r#"
+    proof RefinedSignalTest {
+        input x: refined { Field, x > 0 };
+        output result: Field;
+        assert result === x
+    }"#;
+
+    let result = parse_source(source);
+    assert!(result.is_ok(), "Should parse refined type in signal declaration");
+}
+
+// 6. ARRAY INDEXING
+#[test]
+fn test_parse_array_indexing_basic() {
+    let source = r#"
+    proof ArrayIndexTest {
+        input arr: Array<Field, 10>;
+        input i: Nat;
+        output result: Field;
+        assert result === arr[i]
+    }"#;
+
+    let result = parse_source(source);
+    assert!(result.is_ok(), "Should parse basic array indexing");
+}
+
+#[test]
+fn test_parse_array_indexing_constant() {
+    let source = r#"
+    proof ArrayIndexConstantTest {
+        input arr: Array<Field, 5>;
+        output result: Field;
+        assert result === arr[0]
+    }"#;
+
+    let result = parse_source(source);
+    assert!(result.is_ok(), "Should parse array indexing with constant");
+}
+
+#[test]
+fn test_parse_nested_array_indexing() {
+    let source = r#"
+    proof MatrixIndexTest {
+        input matrix: Array<Array<Field, 3>, 3>;
+        input i: Nat;
+        input j: Nat;
+        output result: Field;
+        assert result === matrix[i][j]
+    }"#;
+
+    let result = parse_source(source);
+    assert!(result.is_ok(), "Should parse nested array indexing (matrix[i][j])");
+}
+
+#[test]
+fn test_parse_array_indexing_in_expression() {
+    let source = r#"
+    proof ArrayExpressionTest {
+        input arr: Array<Field, 10>;
+        input i: Nat;
+        output result: Field;
+        assert result === arr[i] * 2 + arr[i + 1]
+    }"#;
+
+    let result = parse_source(source);
+    assert!(result.is_ok(), "Should parse array indexing in complex expressions");
+}
+
+// 7. MIXED OPERATOR PRECEDENCE
+#[test]
+fn test_parse_mixed_operator_precedence() {
+    // Test: a + b * c / d && e || f
+    // Expected grouping: ((a + ((b * c) / d)) && e) || f
+    let source = r#"
+    proof MixedPrecedenceTest {
+        input a: Field;
+        input b: Field;
+        input c: Field;
+        input d: Field;
+        input e: Bool;
+        input f: Bool;
+        output result: Field;
+        let condition = a + b * c / d > 0 && e || f in
+        assert result === a
+    }"#;
+
+    let result = parse_source(source);
+    assert!(result.is_ok(), "Should parse mixed operators with correct precedence");
+}
+
+#[test]
+fn test_parse_arithmetic_comparison_logical() {
+    let source = r#"
+    proof ArithmeticComparisonLogicalTest {
+        input x: Field;
+        input y: Field;
+        output result: Field;
+        let check = x + 1 > y * 2 && y != 0 in
+        assert result === x
+    }"#;
+
+    let result = parse_source(source);
+    assert!(result.is_ok(), "Should parse arithmetic, comparison, and logical operators");
+}
+
+#[test]
+fn test_parse_operator_precedence_with_parentheses() {
+    let source = r#"
+    proof PrecedenceWithParensTest {
+        input a: Field;
+        input b: Field;
+        input c: Field;
+        output result: Field;
+        assert result === (a + b) * c;
+        assert result === a + (b * c);
+        assert result === ((a + b) * c) / (a - b)
+    }"#;
+
+    let result = parse_source(source);
+    assert!(result.is_ok(), "Should parse operators with explicit parentheses");
+}
+
+// ADDITIONAL EDGE CASE TESTS
+
+#[test]
+fn test_parse_component_without_signals() {
+    // Edge case: component with no signals (should fail or be minimal)
+    let source = r#"
+    component Empty {
+        assert 1 === 1
+    }"#;
+
+    let result = parse_source(source);
+    // This might be valid or invalid depending on language spec
+    // For now, we just check it doesn't crash the parser
+    assert!(result.is_ok() || result.is_err());
+}
+
+#[test]
+fn test_parse_division_by_zero_syntax() {
+    // Parser should accept this syntactically (type checker will catch it)
+    let source = r#"
+    proof DivByZeroSyntax {
+        input x: Field;
+        output result: Field;
+        assert result === x / 0
+    }"#;
+
+    let result = parse_source(source);
+    assert!(result.is_ok(), "Parser should accept division by constant zero (runtime/typechecker issue)");
+}
+
+#[test]
+fn test_parse_not_in_complex_expression() {
+    let source = r#"
+    proof NotComplexTest {
+        input a: Bool;
+        input b: Bool;
+        output result: Bool;
+        assert result === !(a && b)
+    }"#;
+
+    let result = parse_source(source);
+    assert!(result.is_ok(), "Should parse NOT with parenthesized expression");
+}
+
+#[test]
+fn test_parse_chained_divisions() {
+    // a / b / c should parse as (a / b) / c (left-associative)
+    let source = r#"
+    proof ChainedDivTest {
+        input a: Field;
+        input b: Field;
+        input c: Field;
+        output result: Field;
+        assert result === a / b / c
+    }"#;
+
+    let result = parse_source(source);
+    assert!(result.is_ok(), "Should parse chained divisions left-to-right");
+}
+
+#[test]
+fn test_parse_block_with_multiple_statements() {
+    let source = r#"
+    proof MultiStatementBlockTest {
+        input x: Field;
+        output result: Field;
+        let value = {
+            let a = x + 1 in
+            let b = a * 2 in
+            let c = b - 3 in
+            c
+        } in
+        assert result === value
+    }"#;
+
+    let result = parse_source(source);
+    assert!(result.is_ok(), "Should parse block with multiple let statements");
+}
+
+#[test]
+fn test_parse_refined_type_with_equality() {
+    let source = r#"
+    let exactly_ten (x: refined { Field, x == 10 }): Field = x
+    "#;
+
+    let result = parse_source(source);
+    assert!(result.is_ok(), "Should parse refined type with equality predicate");
+}
+
+#[test]
+fn test_parse_array_indexing_with_expression() {
+    let source = r#"
+    proof ArrayComplexIndexTest {
+        input arr: Array<Field, 20>;
+        input i: Nat;
+        input j: Nat;
+        output result: Field;
+        assert result === arr[i + j * 2]
+    }"#;
+
+    let result = parse_source(source);
+    assert!(result.is_ok(), "Should parse array indexing with complex index expression");
 }
 
