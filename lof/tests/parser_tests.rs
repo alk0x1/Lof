@@ -447,7 +447,7 @@ fn test_parse_division_operator() {
             match body.as_ref() {
                 Expression::Assert(expr) => {
                     match expr.as_ref() {
-                        Expression::BinaryOp { op, .. } => {
+                        Expression::BinaryOp { .. } => {
                             // The outermost operation is ===, but we check that division is parsed
                             // The right side should contain division
                             assert!(true); // If we got here, parsing succeeded
