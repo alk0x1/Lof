@@ -1,0 +1,30 @@
+{
+  "circuit_name": "equality",
+  "description": "Equality constraint circuit: a === b",
+  "test_vectors": [
+    {
+      "name": "equal_small",
+      "inputs": {"a": "5", "b": "5"},
+      "expected_outputs": {"result": "1"}
+    },
+    {
+      "name": "equal_zero",
+      "inputs": {"a": "0", "b": "0"},
+      "expected_outputs": {"result": "1"}
+    },
+    {
+      "name": "equal_large",
+      "inputs": {"a": "123456789", "b": "123456789"},
+      "expected_outputs": {"result": "1"}
+    },
+    {
+      "name": "equal_max_field",
+      "inputs": {"a": "21888242871839275222246405745257275088548364400416034343698204186575808495616", "b": "0"},
+      "expected_outputs": {"result": "1"}
+    }
+  ],
+  "validation_rules": {
+    "max_constraint_ratio": 1.5,
+    "require_exact_outputs": true
+  }
+}

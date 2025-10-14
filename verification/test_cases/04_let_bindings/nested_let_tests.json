@@ -1,0 +1,30 @@
+{
+  "circuit_name": "nested_let",
+  "description": "Nested let bindings: let x = a + b in let y = x * c in let z = y - a",
+  "test_vectors": [
+    {
+      "name": "basic_nested",
+      "inputs": {"a": "2", "b": "3", "c": "4"},
+      "expected_outputs": {"result": "18"}
+    },
+    {
+      "name": "zero_input",
+      "inputs": {"a": "0", "b": "5", "c": "3"},
+      "expected_outputs": {"result": "15"}
+    },
+    {
+      "name": "identity",
+      "inputs": {"a": "1", "b": "0", "c": "1"},
+      "expected_outputs": {"result": "0"}
+    },
+    {
+      "name": "large_computation",
+      "inputs": {"a": "10", "b": "20", "c": "5"},
+      "expected_outputs": {"result": "140"}
+    }
+  ],
+  "validation_rules": {
+    "max_constraint_ratio": 2.0,
+    "require_exact_outputs": true
+  }
+}

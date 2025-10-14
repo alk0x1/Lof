@@ -1,0 +1,30 @@
+{
+  "circuit_name": "multi_witness",
+  "description": "Multiple witness values: x = a + b, y = a * b, z = a - b",
+  "test_vectors": [
+    {
+      "name": "basic_multi",
+      "inputs": {"a": "5", "b": "3"},
+      "expected_outputs": {"x": "8", "y": "15", "z": "2"}
+    },
+    {
+      "name": "zero_b",
+      "inputs": {"a": "10", "b": "0"},
+      "expected_outputs": {"x": "10", "y": "0", "z": "10"}
+    },
+    {
+      "name": "equal_values",
+      "inputs": {"a": "7", "b": "7"},
+      "expected_outputs": {"x": "14", "y": "49", "z": "0"}
+    },
+    {
+      "name": "large_values",
+      "inputs": {"a": "100", "b": "50"},
+      "expected_outputs": {"x": "150", "y": "5000", "z": "50"}
+    }
+  ],
+  "validation_rules": {
+    "max_constraint_ratio": 2.0,
+    "require_exact_outputs": true
+  }
+}
