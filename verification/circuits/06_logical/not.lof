@@ -1,0 +1,6 @@
+proof Not {
+    input a: field;
+    witness result: field;
+
+    result === (1 - a)
+}

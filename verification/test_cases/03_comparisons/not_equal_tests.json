@@ -1,0 +1,30 @@
+{
+  "circuit_name": "not_equal",
+  "description": "Not equal comparison: a != b",
+  "test_vectors": [
+    {
+      "name": "true_different",
+      "inputs": {"a": "10", "b": "5"},
+      "expected_outputs": {"result": "1"}
+    },
+    {
+      "name": "false_equal",
+      "inputs": {"a": "7", "b": "7"},
+      "expected_outputs": {"result": "0"}
+    },
+    {
+      "name": "zero_nonzero",
+      "inputs": {"a": "0", "b": "1"},
+      "expected_outputs": {"result": "1"}
+    },
+    {
+      "name": "both_zero",
+      "inputs": {"a": "0", "b": "0"},
+      "expected_outputs": {"result": "0"}
+    }
+  ],
+  "validation_rules": {
+    "max_constraint_ratio": 2.0,
+    "require_exact_outputs": true
+  }
+}

@@ -1,7 +1,7 @@
-proof LessThan {
+proof And {
     input a: field;
     input b: field;
     witness result: field;
 
-    result === (a < b)
+    result === (a * b)
 }

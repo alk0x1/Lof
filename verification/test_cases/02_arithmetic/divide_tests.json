@@ -1,0 +1,30 @@
+{
+  "circuit_name": "divide",
+  "description": "Division circuit: a / b = c",
+  "test_vectors": [
+    {
+      "name": "basic_divide",
+      "inputs": {"a": "20", "b": "4"},
+      "expected_outputs": {"c": "5"}
+    },
+    {
+      "name": "exact_division",
+      "inputs": {"a": "100", "b": "10"},
+      "expected_outputs": {"c": "10"}
+    },
+    {
+      "name": "divide_by_one",
+      "inputs": {"a": "42", "b": "1"},
+      "expected_outputs": {"c": "42"}
+    },
+    {
+      "name": "large_division",
+      "inputs": {"a": "1000000", "b": "1000"},
+      "expected_outputs": {"c": "1000"}
+    }
+  ],
+  "validation_rules": {
+    "max_constraint_ratio": 2.0,
+    "require_exact_outputs": true
+  }
+}

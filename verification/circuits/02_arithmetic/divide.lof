@@ -1,0 +1,8 @@
+proof Divide {
+    input a: field;
+    input b: field;
+    witness c: field;
+
+    let quotient = a / b in
+    assert quotient === c
+}

@@ -1,0 +1,30 @@
+{
+  "circuit_name": "array_computation",
+  "description": "Array computations: sum and product of array elements",
+  "test_vectors": [
+    {
+      "name": "basic",
+      "inputs": {"arr": ["2", "3", "4"]},
+      "expected_outputs": {"sum": "9", "product": "24"}
+    },
+    {
+      "name": "with_one",
+      "inputs": {"arr": ["1", "1", "1"]},
+      "expected_outputs": {"sum": "3", "product": "1"}
+    },
+    {
+      "name": "with_zero",
+      "inputs": {"arr": ["5", "0", "3"]},
+      "expected_outputs": {"sum": "8", "product": "0"}
+    },
+    {
+      "name": "larger",
+      "inputs": {"arr": ["10", "20", "30"]},
+      "expected_outputs": {"sum": "60", "product": "6000"}
+    }
+  ],
+  "validation_rules": {
+    "max_constraint_ratio": 2.0,
+    "require_exact_outputs": true
+  }
+}

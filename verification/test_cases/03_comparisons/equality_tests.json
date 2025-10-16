@@ -18,8 +18,8 @@
       "expected_outputs": {"result": "1"}
     },
     {
-      "name": "equal_max_field",
-      "inputs": {"a": "21888242871839275222246405745257275088548364400416034343698204186575808495616", "b": "0"},
+      "name": "equal_large_prime",
+      "inputs": {"a": "999999999999", "b": "999999999999"},
       "expected_outputs": {"result": "1"}
     }
   ],

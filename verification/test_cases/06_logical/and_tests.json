@@ -1,0 +1,30 @@
+{
+  "circuit_name": "and",
+  "description": "Logical AND: a && b",
+  "test_vectors": [
+    {
+      "name": "both_true",
+      "inputs": {"a": "1", "b": "1"},
+      "expected_outputs": {"result": "1"}
+    },
+    {
+      "name": "first_false",
+      "inputs": {"a": "0", "b": "1"},
+      "expected_outputs": {"result": "0"}
+    },
+    {
+      "name": "second_false",
+      "inputs": {"a": "1", "b": "0"},
+      "expected_outputs": {"result": "0"}
+    },
+    {
+      "name": "both_false",
+      "inputs": {"a": "0", "b": "0"},
+      "expected_outputs": {"result": "0"}
+    }
+  ],
+  "validation_rules": {
+    "max_constraint_ratio": 1.5,
+    "require_exact_outputs": true
+  }
+}

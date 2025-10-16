@@ -1,0 +1,30 @@
+{
+  "circuit_name": "greater_than",
+  "description": "Greater than comparison: a > b",
+  "test_vectors": [
+    {
+      "name": "true_case",
+      "inputs": {"a": "10", "b": "5"},
+      "expected_outputs": {"result": "1"}
+    },
+    {
+      "name": "false_case",
+      "inputs": {"a": "5", "b": "10"},
+      "expected_outputs": {"result": "0"}
+    },
+    {
+      "name": "equal_case",
+      "inputs": {"a": "7", "b": "7"},
+      "expected_outputs": {"result": "0"}
+    },
+    {
+      "name": "large_numbers",
+      "inputs": {"a": "1000000", "b": "999999"},
+      "expected_outputs": {"result": "1"}
+    }
+  ],
+  "validation_rules": {
+    "max_constraint_ratio": 2.0,
+    "require_exact_outputs": true
+  }
+}

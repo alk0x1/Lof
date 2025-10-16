@@ -1,0 +1,30 @@
+{
+  "circuit_name": "tuple_destructure",
+  "description": "Tuple destructuring: let (a, b) = pair",
+  "test_vectors": [
+    {
+      "name": "basic_pair",
+      "inputs": {"pair_0": "10", "pair_1": "20"},
+      "expected_outputs": {"first": "10", "second": "20"}
+    },
+    {
+      "name": "with_zeros",
+      "inputs": {"pair_0": "0", "pair_1": "42"},
+      "expected_outputs": {"first": "0", "second": "42"}
+    },
+    {
+      "name": "same_values",
+      "inputs": {"pair_0": "7", "pair_1": "7"},
+      "expected_outputs": {"first": "7", "second": "7"}
+    },
+    {
+      "name": "large_values",
+      "inputs": {"pair_0": "999", "pair_1": "888"},
+      "expected_outputs": {"first": "999", "second": "888"}
+    }
+  ],
+  "validation_rules": {
+    "max_constraint_ratio": 1.5,
+    "require_exact_outputs": true
+  }
+}

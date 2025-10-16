@@ -1,0 +1,30 @@
+{
+  "circuit_name": "simple_match",
+  "description": "Simple pattern matching with literal patterns",
+  "test_vectors": [
+    {
+      "name": "match_zero",
+      "inputs": {"x": "0"},
+      "expected_outputs": {"result": "100"}
+    },
+    {
+      "name": "match_one",
+      "inputs": {"x": "1"},
+      "expected_outputs": {"result": "200"}
+    },
+    {
+      "name": "match_default_2",
+      "inputs": {"x": "2"},
+      "expected_outputs": {"result": "300"}
+    },
+    {
+      "name": "match_default_99",
+      "inputs": {"x": "99"},
+      "expected_outputs": {"result": "300"}
+    }
+  ],
+  "validation_rules": {
+    "max_constraint_ratio": 2.5,
+    "require_exact_outputs": true
+  }
+}

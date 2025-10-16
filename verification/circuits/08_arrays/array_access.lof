@@ -1,0 +1,10 @@
+proof ArrayAccess {
+    input arr: array<field, 3>;
+    witness first: field;
+    witness second: field;
+    witness third: field;
+
+    assert arr[0] === first;
+    assert arr[1] === second;
+    assert arr[2] === third
+}

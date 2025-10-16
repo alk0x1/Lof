@@ -1,0 +1,30 @@
+{
+  "circuit_name": "simple_function",
+  "description": "Simple function call: square(a)",
+  "test_vectors": [
+    {
+      "name": "square_zero",
+      "inputs": {"a": "0"},
+      "expected_outputs": {"result": "0"}
+    },
+    {
+      "name": "square_one",
+      "inputs": {"a": "1"},
+      "expected_outputs": {"result": "1"}
+    },
+    {
+      "name": "square_five",
+      "inputs": {"a": "5"},
+      "expected_outputs": {"result": "25"}
+    },
+    {
+      "name": "square_ten",
+      "inputs": {"a": "10"},
+      "expected_outputs": {"result": "100"}
+    }
+  ],
+  "validation_rules": {
+    "max_constraint_ratio": 1.5,
+    "require_exact_outputs": true
+  }
+}

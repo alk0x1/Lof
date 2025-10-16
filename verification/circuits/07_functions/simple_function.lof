@@ -1,0 +1,10 @@
+let square (x: field): field =
+    x * x
+
+proof SimpleFunction {
+    input a: field;
+    witness result: field;
+
+    let squared = square(a) in
+    assert squared === result
+}

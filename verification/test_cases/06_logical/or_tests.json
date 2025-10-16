@@ -1,0 +1,30 @@
+{
+  "circuit_name": "or",
+  "description": "Logical OR: a || b",
+  "test_vectors": [
+    {
+      "name": "both_true",
+      "inputs": {"a": "1", "b": "1"},
+      "expected_outputs": {"result": "1"}
+    },
+    {
+      "name": "first_true",
+      "inputs": {"a": "1", "b": "0"},
+      "expected_outputs": {"result": "1"}
+    },
+    {
+      "name": "second_true",
+      "inputs": {"a": "0", "b": "1"},
+      "expected_outputs": {"result": "1"}
+    },
+    {
+      "name": "both_false",
+      "inputs": {"a": "0", "b": "0"},
+      "expected_outputs": {"result": "0"}
+    }
+  ],
+  "validation_rules": {
+    "max_constraint_ratio": 1.5,
+    "require_exact_outputs": true
+  }
+}

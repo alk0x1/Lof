@@ -71,8 +71,15 @@ class Verifier:
 
         # Compile Circom
         print(f"  Circom: {circom_file.name}")
+
+        # Add circomlib include path if node_modules exists
+        circom_cmd = ["circom", circom_file.name, "--r1cs", "--wasm", "--sym", "--output", str(circom_out)]
+        node_modules = self.root_dir / "node_modules"
+        if node_modules.exists():
+            circom_cmd.extend(["-l", str(node_modules)])
+
         result = subprocess.run(
-            ["circom", circom_file.name, "--r1cs", "--wasm", "--sym", "--output", str(circom_out)],
+            circom_cmd,
             cwd=category_dir,
             capture_output=True,
             text=True
@@ -224,11 +231,12 @@ class Verifier:
                 if full_witness:
                     with open(full_witness) as f:
                         witness_data = json.load(f)
-                    witness_array = list(witness_data.values())
+                    # Keep as dictionary to preserve variable names
+                    # This allows extraction by name rather than position
 
                     lof_json = lof_witnesses / f"test_input_{i}.json"
                     with open(lof_json, 'w') as f:
-                        json.dump(witness_array, f)
+                        json.dump(witness_data, f)
                 else:
                     print(f"    FAILED: Lof witness not generated in {temp_dir}")
                     return False

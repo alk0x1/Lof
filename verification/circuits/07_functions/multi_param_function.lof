@@ -1,0 +1,13 @@
+let multiply_and_add (a: field) (b: field) (c: field): field =
+    let product = a * b in
+    product + c
+
+proof MultiParamFunction {
+    input x: field;
+    input y: field;
+    input z: field;
+    witness result: field;
+
+    let computed = multiply_and_add(x, y, z) in
+    assert computed === result
+}

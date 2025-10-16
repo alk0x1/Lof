@@ -1,0 +1,40 @@
+{
+  "circuit_name": "less_than",
+  "description": "Less than comparison: result = (a < b)",
+  "test_vectors": [
+    {
+      "name": "less_small_true",
+      "inputs": {"a": "3", "b": "5"},
+      "expected_outputs": {"result": "1"}
+    },
+    {
+      "name": "less_small_false",
+      "inputs": {"a": "5", "b": "3"},
+      "expected_outputs": {"result": "0"}
+    },
+    {
+      "name": "less_equal",
+      "inputs": {"a": "7", "b": "7"},
+      "expected_outputs": {"result": "0"}
+    },
+    {
+      "name": "less_zero",
+      "inputs": {"a": "0", "b": "1"},
+      "expected_outputs": {"result": "1"}
+    },
+    {
+      "name": "less_large_true",
+      "inputs": {"a": "100", "b": "200"},
+      "expected_outputs": {"result": "1"}
+    },
+    {
+      "name": "less_large_false",
+      "inputs": {"a": "200", "b": "100"},
+      "expected_outputs": {"result": "0"}
+    }
+  ],
+  "validation_rules": {
+    "max_constraint_ratio": 2.0,
+    "require_exact_outputs": true
+  }
+}

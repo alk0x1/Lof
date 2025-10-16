@@ -1,0 +1,11 @@
+proof VariableMatch {
+    input x: field;
+    input y: field;
+    witness result: field;
+
+    let matched = match x with
+        | 0 => y
+        | n => n * 2
+    in
+    assert matched === result
+}

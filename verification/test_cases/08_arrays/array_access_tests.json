@@ -1,0 +1,30 @@
+{
+  "circuit_name": "array_access",
+  "description": "Array indexing: arr[0], arr[1], arr[2]",
+  "test_vectors": [
+    {
+      "name": "sequential",
+      "inputs": {"arr": ["1", "2", "3"]},
+      "expected_outputs": {"first": "1", "second": "2", "third": "3"}
+    },
+    {
+      "name": "reverse",
+      "inputs": {"arr": ["10", "5", "1"]},
+      "expected_outputs": {"first": "10", "second": "5", "third": "1"}
+    },
+    {
+      "name": "with_zeros",
+      "inputs": {"arr": ["0", "42", "0"]},
+      "expected_outputs": {"first": "0", "second": "42", "third": "0"}
+    },
+    {
+      "name": "large_values",
+      "inputs": {"arr": ["100", "200", "300"]},
+      "expected_outputs": {"first": "100", "second": "200", "third": "300"}
+    }
+  ],
+  "validation_rules": {
+    "max_constraint_ratio": 1.5,
+    "require_exact_outputs": true
+  }
+}

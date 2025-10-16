@@ -1,0 +1,20 @@
+{
+  "circuit_name": "not",
+  "description": "Logical NOT: !a",
+  "test_vectors": [
+    {
+      "name": "not_true",
+      "inputs": {"a": "1"},
+      "expected_outputs": {"result": "0"}
+    },
+    {
+      "name": "not_false",
+      "inputs": {"a": "0"},
+      "expected_outputs": {"result": "1"}
+    }
+  ],
+  "validation_rules": {
+    "max_constraint_ratio": 1.5,
+    "require_exact_outputs": true
+  }
+}

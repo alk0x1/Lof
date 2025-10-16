@@ -1,0 +1,11 @@
+proof ArrayComputation {
+    input arr: array<field, 3>;
+    witness sum: field;
+    witness product: field;
+
+    let s = arr[0] + arr[1] + arr[2] in
+    let p = arr[0] * arr[1] * arr[2] in {
+        assert s === sum;
+        assert p === product
+    }
+}

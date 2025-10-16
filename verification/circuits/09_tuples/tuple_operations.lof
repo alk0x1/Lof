@@ -1,0 +1,15 @@
+proof TupleOperations {
+    input pair1: (field, field);
+    input pair2: (field, field);
+    witness sum: field;
+    witness product: field;
+
+    let (a, b) = pair1 in
+    let (c, d) = pair2 in {
+        let s = a + b + c + d in
+        let p = (a * b) + (c * d) in {
+            assert s === sum;
+            assert p === product
+        }
+    }
+}

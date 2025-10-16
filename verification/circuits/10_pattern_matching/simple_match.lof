@@ -1,0 +1,11 @@
+proof SimpleMatch {
+    input x: field;
+    witness result: field;
+
+    let matched = match x with
+        | 0 => 100
+        | 1 => 200
+        | _ => 300
+    in
+    assert matched === result
+}

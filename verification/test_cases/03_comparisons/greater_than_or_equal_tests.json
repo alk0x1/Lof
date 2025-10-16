@@ -1,0 +1,30 @@
+{
+  "circuit_name": "greater_than_or_equal",
+  "description": "Greater than or equal comparison: a >= b",
+  "test_vectors": [
+    {
+      "name": "true_greater",
+      "inputs": {"a": "10", "b": "5"},
+      "expected_outputs": {"result": "1"}
+    },
+    {
+      "name": "true_equal",
+      "inputs": {"a": "7", "b": "7"},
+      "expected_outputs": {"result": "1"}
+    },
+    {
+      "name": "false_case",
+      "inputs": {"a": "5", "b": "10"},
+      "expected_outputs": {"result": "0"}
+    },
+    {
+      "name": "large_equal",
+      "inputs": {"a": "999999", "b": "999999"},
+      "expected_outputs": {"result": "1"}
+    }
+  ],
+  "validation_rules": {
+    "max_constraint_ratio": 2.0,
+    "require_exact_outputs": true
+  }
+}

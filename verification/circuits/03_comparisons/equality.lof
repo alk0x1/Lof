@@ -2,6 +2,8 @@ proof Equality {
     input a: field;
     input b: field;
     witness result: field;
-    
-    assert a === b
+
+    assert a === b;
+    let one = 1 in
+    assert result === one
 }

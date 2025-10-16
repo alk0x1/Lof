@@ -1,0 +1,30 @@
+{
+  "circuit_name": "less_than_or_equal",
+  "description": "Less than or equal comparison: a <= b",
+  "test_vectors": [
+    {
+      "name": "true_less",
+      "inputs": {"a": "5", "b": "10"},
+      "expected_outputs": {"result": "1"}
+    },
+    {
+      "name": "true_equal",
+      "inputs": {"a": "7", "b": "7"},
+      "expected_outputs": {"result": "1"}
+    },
+    {
+      "name": "false_case",
+      "inputs": {"a": "10", "b": "5"},
+      "expected_outputs": {"result": "0"}
+    },
+    {
+      "name": "zero_case",
+      "inputs": {"a": "0", "b": "0"},
+      "expected_outputs": {"result": "1"}
+    }
+  ],
+  "validation_rules": {
+    "max_constraint_ratio": 2.0,
+    "require_exact_outputs": true
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "circuit_name": "variable_match",
+  "description": "Pattern matching with variable binding",
+  "test_vectors": [
+    {
+      "name": "match_zero",
+      "inputs": {"x": "0", "y": "42"},
+      "expected_outputs": {"result": "42"}
+    },
+    {
+      "name": "match_variable_5",
+      "inputs": {"x": "5", "y": "100"},
+      "expected_outputs": {"result": "10"}
+    },
+    {
+      "name": "match_variable_10",
+      "inputs": {"x": "10", "y": "7"},
+      "expected_outputs": {"result": "20"}
+    },
+    {
+      "name": "match_variable_1",
+      "inputs": {"x": "1", "y": "999"},
+      "expected_outputs": {"result": "2"}
+    }
+  ],
+  "validation_rules": {
+    "max_constraint_ratio": 2.5,
+    "require_exact_outputs": true
+  }
+}

@@ -1,0 +1,10 @@
+proof TupleDestructure {
+    input pair: (field, field);
+    witness first: field;
+    witness second: field;
+
+    let (a, b) = pair in {
+        assert a === first;
+        assert b === second
+    }
+}

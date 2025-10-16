@@ -1,0 +1,30 @@
+{
+  "circuit_name": "multi_param_function",
+  "description": "Multi-parameter function: multiply_and_add(x, y, z) = x*y + z",
+  "test_vectors": [
+    {
+      "name": "basic_calc",
+      "inputs": {"x": "2", "y": "3", "z": "4"},
+      "expected_outputs": {"result": "10"}
+    },
+    {
+      "name": "with_zero",
+      "inputs": {"x": "5", "y": "0", "z": "7"},
+      "expected_outputs": {"result": "7"}
+    },
+    {
+      "name": "large_numbers",
+      "inputs": {"x": "100", "y": "200", "z": "300"},
+      "expected_outputs": {"result": "20300"}
+    },
+    {
+      "name": "all_ones",
+      "inputs": {"x": "1", "y": "1", "z": "1"},
+      "expected_outputs": {"result": "2"}
+    }
+  ],
+  "validation_rules": {
+    "max_constraint_ratio": 2.0,
+    "require_exact_outputs": true
+  }
+}

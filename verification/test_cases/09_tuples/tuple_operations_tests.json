@@ -1,0 +1,30 @@
+{
+  "circuit_name": "tuple_operations",
+  "description": "Operations on multiple tuples",
+  "test_vectors": [
+    {
+      "name": "basic_ops",
+      "inputs": {"pair1_0": "2", "pair1_1": "3", "pair2_0": "4", "pair2_1": "5"},
+      "expected_outputs": {"sum": "14", "product": "26"}
+    },
+    {
+      "name": "with_ones",
+      "inputs": {"pair1_0": "1", "pair1_1": "1", "pair2_0": "1", "pair2_1": "1"},
+      "expected_outputs": {"sum": "4", "product": "2"}
+    },
+    {
+      "name": "with_zeros",
+      "inputs": {"pair1_0": "0", "pair1_1": "5", "pair2_0": "3", "pair2_1": "0"},
+      "expected_outputs": {"sum": "8", "product": "0"}
+    },
+    {
+      "name": "larger_values",
+      "inputs": {"pair1_0": "10", "pair1_1": "20", "pair2_0": "30", "pair2_1": "40"},
+      "expected_outputs": {"sum": "100", "product": "1400"}
+    }
+  ],
+  "validation_rules": {
+    "max_constraint_ratio": 2.0,
+    "require_exact_outputs": true
+  }
+}
