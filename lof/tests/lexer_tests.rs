@@ -1,4 +1,4 @@
-use lof::lexer::{Lexer, Token, Keyword, Symbol};
+use lof::lexer::{Keyword, Lexer, Symbol, Token};
 
 #[test]
 fn test_basic_tokens() {
@@ -62,12 +62,14 @@ fn test_numbers() {
     assert_eq!(lexer.next_token(), Token::Number(999));
 }
 
-
 #[test]
 fn test_comments() {
     let mut lexer = Lexer::new("x // this is a comment\ny");
     assert_eq!(lexer.next_token(), Token::Identifier("x".to_string()));
-    assert_eq!(lexer.next_token(), Token::Comment(" this is a comment".to_string()));
+    assert_eq!(
+        lexer.next_token(),
+        Token::Comment(" this is a comment".to_string())
+    );
     assert_eq!(lexer.next_token(), Token::Identifier("y".to_string()));
 }
 
@@ -84,7 +86,10 @@ fn test_whitespace_handling() {
 fn test_identifiers_and_underscores() {
     let mut lexer = Lexer::new("my_var CamelCase x1 var_123");
     assert_eq!(lexer.next_token(), Token::Identifier("my_var".to_string()));
-    assert_eq!(lexer.next_token(), Token::Identifier("CamelCase".to_string()));
+    assert_eq!(
+        lexer.next_token(),
+        Token::Identifier("CamelCase".to_string())
+    );
     assert_eq!(lexer.next_token(), Token::Identifier("x1".to_string()));
     assert_eq!(lexer.next_token(), Token::Identifier("var_123".to_string()));
 }
@@ -111,9 +116,9 @@ fn test_complete_proof_structure() {
       let temp = x * w in
       assert y === temp;
     }"#;
-    
+
     let tokens: Vec<Token> = Lexer::new(input).collect();
-    
+
     let expected_tokens = vec![
         Token::Keyword(Keyword::Proof),
         Token::Identifier("MyProof".to_string()),
@@ -147,11 +152,20 @@ fn test_complete_proof_structure() {
         Token::Symbol(Symbol::Semi),
         Token::Symbol(Symbol::RBrace),
     ];
-    
-    assert_eq!(tokens.len(), expected_tokens.len(), 
-               "Expected {} tokens, but got {}", expected_tokens.len(), tokens.len());
-    
+
+    assert_eq!(
+        tokens.len(),
+        expected_tokens.len(),
+        "Expected {} tokens, but got {}",
+        expected_tokens.len(),
+        tokens.len()
+    );
+
     for (i, (actual, expected)) in tokens.iter().zip(expected_tokens.iter()).enumerate() {
-        assert_eq!(actual, expected, "Token mismatch at position {}: expected {:?}, got {:?}", i, expected, actual);
+        assert_eq!(
+            actual, expected,
+            "Token mismatch at position {}: expected {:?}, got {:?}",
+            i, expected, actual
+        );
     }
 }

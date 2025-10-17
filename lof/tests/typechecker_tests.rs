@@ -1,14 +1,15 @@
-use lof::typechecker::{TypeChecker, TypeError};
-use lof::parser::Parser;
 use lof::lexer::Lexer;
+use lof::parser::Parser;
+use lof::typechecker::{TypeChecker, TypeError};
 
 fn parse_and_type_check(source: &str) -> Result<(), TypeError> {
     let lexer = Lexer::new(source);
     let mut parser = Parser::new(lexer);
-    
-    let ast = parser.parse_program()
+
+    let ast = parser
+        .parse_program()
         .map_err(|_| TypeError::InvalidExpression)?;
-    
+
     let mut type_checker = TypeChecker::new();
     type_checker.check_program(&ast)
 }
@@ -18,10 +19,17 @@ fn type_check_passes(source: &str) -> bool {
 }
 
 fn type_check_fails_with_undefined_error(source: &str) -> bool {
-    match parse_and_type_check(source) {
-        Err(TypeError::UndefinedVariable(_)) => true,
-        _ => false,
-    }
+    matches!(
+        parse_and_type_check(source),
+        Err(TypeError::UndefinedVariable(_))
+    )
+}
+
+fn type_check_fails_with_unconstrained_witness_error(source: &str) -> bool {
+    matches!(
+        parse_and_type_check(source),
+        Err(TypeError::UnconstrainedWitness { .. })
+    )
 }
 
 #[test]
@@ -62,8 +70,6 @@ fn test_proof_block_allows_multi_use() {
     }"#;
     assert!(type_check_passes(source));
 }
-
-
 
 #[test]
 fn test_undefined_variable() {
@@ -157,7 +163,6 @@ fn test_multiple_inputs_and_witnesses() {
     assert!(type_check_passes(source));
 }
 
-
 #[test]
 fn test_comparison_operators() {
     let source = r#"
@@ -196,7 +201,6 @@ fn test_linear_type_enforcement() {
 
     assert!(type_check_passes(source));
 }
-
 
 #[test]
 fn test_multiple_consumption_in_assertions() {
@@ -243,7 +247,6 @@ fn test_proof_block_multi_assertions() {
     assert!(type_check_passes(source));
 }
 
-
 // ============================================================================
 // PHASE 2: CONSTRAINT TRACKING TESTS
 // ============================================================================
@@ -271,11 +274,12 @@ fn test_witness_starts_unconstrained() {
 
 #[test]
 fn test_input_automatically_constrained() {
-    // Inputs are public - automatically constrained
+    // Inputs are public - automatically constrained, no witnesses to validate
     let source = r#"
     proof Test {
         input x: field;
         // No explicit constraint needed - inputs are inherently constrained
+        assert x > 0
     }
     "#;
     assert!(type_check_passes(source));
@@ -503,18 +507,20 @@ fn test_subtraction_does_not_constrain() {
 
 #[test]
 fn test_comparison_does_not_constrain() {
-    // Comparison operators don't create constraints (they're checked, not asserted)
-    // Note: This might be debatable - comparisons in assertions DO constrain
+    // Comparison operators don't create constraints by themselves
+    // The witnesses x and y are only used in a comparison, which creates a bool
+    // But the bool isn't used in a constraining operation (like mult)
     let source = r#"
     proof Invalid {
         witness x: field;
         witness y: field;
-        let is_greater = x > y in  // Comparison doesn't constrain
-        assert is_greater === true
+        input z: field;
+        let is_greater = x > y in  // Comparison doesn't constrain x or y
+        let result = z * z in       // This constrains z (input, auto-constrained)
+        assert result > 0
     }
     "#;
-    // This test might need refinement based on actual semantics
-    // For now, testing that comparison alone doesn't constrain
+    // x and y should still be unconstrained - they're only used in comparison
     assert!(type_check_fails_with_unconstrained_witness_error(source));
 }
 
@@ -707,6 +713,7 @@ fn test_witness_only_in_witness_list() {
     let source = r#"
     proof EmptyWitness {
         witness unused: field;
+        assert 1 > 0
     }
     "#;
     assert!(type_check_fails_with_unconstrained_witness_error(source));

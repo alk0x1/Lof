@@ -1,11 +1,13 @@
-use lof::parser::Parser;
-use lof::lexer::Lexer;
 use lof::ast::Expression;
+use lof::lexer::Lexer;
+use lof::parser::Parser;
 
 fn parse_source(source: &str) -> Result<Vec<Expression>, String> {
     let lexer = Lexer::new(source);
     let mut parser = Parser::new(lexer);
-    parser.parse_program().map_err(|e| format!("Parse error: {:?}", e))
+    parser
+        .parse_program()
+        .map_err(|e| format!("Parse error: {:?}", e))
 }
 
 #[test]
@@ -21,7 +23,11 @@ fn test_simple_proof_from_docs() {
     }"#;
 
     let result = parse_source(source);
-    assert!(result.is_ok(), "Failed to parse simple proof from docs: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Failed to parse simple proof from docs: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -35,7 +41,11 @@ fn test_component_definition() {
     }"#;
 
     let result = parse_source(source);
-    assert!(result.is_ok(), "Failed to parse component: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Failed to parse component: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -58,7 +68,11 @@ fn test_component_instantiation_in_proof() {
     }"#;
 
     let result = parse_source(source);
-    assert!(result.is_ok(), "Failed to parse component instantiation: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Failed to parse component instantiation: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -73,7 +87,11 @@ fn test_all_signal_types() {
     }"#;
 
     let result = parse_source(source);
-    assert!(result.is_ok(), "Failed to parse signal types: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Failed to parse signal types: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -89,7 +107,11 @@ fn test_primitive_types() {
     }"#;
 
     let result = parse_source(source);
-    assert!(result.is_ok(), "Failed to parse primitive types: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Failed to parse primitive types: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -103,7 +125,11 @@ fn test_array_type() {
     }"#;
 
     let result = parse_source(source);
-    assert!(result.is_ok(), "Failed to parse array type: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Failed to parse array type: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -118,7 +144,11 @@ fn test_tuple_type() {
     }"#;
 
     let result = parse_source(source);
-    assert!(result.is_ok(), "Failed to parse tuple types: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Failed to parse tuple types: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -128,7 +158,11 @@ fn test_refined_type() {
     "#;
 
     let result = parse_source(source);
-    assert!(result.is_ok(), "Failed to parse refined type: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Failed to parse refined type: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -146,7 +180,11 @@ fn test_curried_functions() {
     }"#;
 
     let result = parse_source(source);
-    assert!(result.is_ok(), "Failed to parse curried functions: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Failed to parse curried functions: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -162,7 +200,11 @@ fn test_let_binding_with_pattern() {
     }"#;
 
     let result = parse_source(source);
-    assert!(result.is_ok(), "Failed to parse let bindings: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Failed to parse let bindings: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -177,7 +219,11 @@ fn test_tuple_destructuring() {
     }"#;
 
     let result = parse_source(source);
-    assert!(result.is_ok(), "Failed to parse tuple destructuring: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Failed to parse tuple destructuring: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -196,7 +242,11 @@ fn test_all_pattern_types() {
     }"#;
 
     let result = parse_source(source);
-    assert!(result.is_ok(), "Failed to parse patterns: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Failed to parse patterns: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -214,7 +264,11 @@ fn test_wildcard_pattern() {
     }"#;
 
     let result = parse_source(source);
-    assert!(result.is_ok(), "Failed to parse wildcard pattern: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Failed to parse wildcard pattern: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -233,7 +287,11 @@ fn test_all_arithmetic_operators() {
     }"#;
 
     let result = parse_source(source);
-    assert!(result.is_ok(), "Failed to parse arithmetic operators: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Failed to parse arithmetic operators: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -254,7 +312,11 @@ fn test_all_comparison_operators() {
     }"#;
 
     let result = parse_source(source);
-    assert!(result.is_ok(), "Failed to parse comparison operators: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Failed to parse comparison operators: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -272,7 +334,11 @@ fn test_all_logical_operators() {
     }"#;
 
     let result = parse_source(source);
-    assert!(result.is_ok(), "Failed to parse logical operators: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Failed to parse logical operators: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -286,7 +352,11 @@ fn test_constraint_equality() {
     }"#;
 
     let result = parse_source(source);
-    assert!(result.is_ok(), "Failed to parse constraint equality: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Failed to parse constraint equality: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -302,7 +372,11 @@ fn test_operator_precedence() {
     }"#;
 
     let result = parse_source(source);
-    assert!(result.is_ok(), "Failed to parse operator precedence: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Failed to parse operator precedence: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -318,7 +392,11 @@ fn test_parentheses_override_precedence() {
     }"#;
 
     let result = parse_source(source);
-    assert!(result.is_ok(), "Failed to parse parentheses: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Failed to parse parentheses: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -336,7 +414,11 @@ fn test_assertions() {
     }"#;
 
     let result = parse_source(source);
-    assert!(result.is_ok(), "Failed to parse assertions: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Failed to parse assertions: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -355,7 +437,11 @@ fn test_block_expressions() {
     }"#;
 
     let result = parse_source(source);
-    assert!(result.is_ok(), "Failed to parse block expressions: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Failed to parse block expressions: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -370,7 +456,11 @@ fn test_array_indexing() {
     }"#;
 
     let result = parse_source(source);
-    assert!(result.is_ok(), "Failed to parse array indexing: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Failed to parse array indexing: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -387,7 +477,11 @@ fn test_complete_example_from_docs() {
     }"#;
 
     let result = parse_source(source);
-    assert!(result.is_ok(), "Failed to parse complete example: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Failed to parse complete example: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -403,7 +497,11 @@ fn test_multiple_assertions() {
     }"#;
 
     let result = parse_source(source);
-    assert!(result.is_ok(), "Failed to parse multiple assertions: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Failed to parse multiple assertions: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -423,7 +521,11 @@ fn test_complex_pattern_matching() {
     }"#;
 
     let result = parse_source(source);
-    assert!(result.is_ok(), "Failed to parse complex pattern matching: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Failed to parse complex pattern matching: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -442,7 +544,11 @@ fn test_nested_expressions() {
     }"#;
 
     let result = parse_source(source);
-    assert!(result.is_ok(), "Failed to parse nested expressions: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Failed to parse nested expressions: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -459,7 +565,11 @@ fn test_tuple_construction() {
     }"#;
 
     let result = parse_source(source);
-    assert!(result.is_ok(), "Failed to parse tuple construction: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Failed to parse tuple construction: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -474,5 +584,9 @@ fn test_empty_tuple() {
     }"#;
 
     let result = parse_source(source);
-    assert!(result.is_ok(), "Failed to parse empty tuple: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Failed to parse empty tuple: {:?}",
+        result.err()
+    );
 }

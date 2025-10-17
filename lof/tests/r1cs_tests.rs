@@ -1,33 +1,37 @@
-use lof::r1cs::{R1CSGenerator, LinearCombination, R1CSConstraint};
-use lof::parser::Parser;
-use lof::lexer::Lexer;
-use lof::typechecker::TypeChecker;
 use lof::ast::Expression;
+use lof::lexer::Lexer;
+use lof::parser::Parser;
+use lof::r1cs::{LinearCombination, R1CSConstraint, R1CSGenerator};
+use lof::typechecker::TypeChecker;
+use num_bigint::BigInt;
 
 fn compile_to_r1cs(source: &str) -> Result<R1CSGenerator, String> {
     // Parse
     let lexer = Lexer::new(source);
     let mut parser = Parser::new(lexer);
-    let ast = parser.parse_program()
+    let ast = parser
+        .parse_program()
         .map_err(|e| format!("Parse error: {:?}", e))?;
-    
+
     // Type check
     let mut type_checker = TypeChecker::new();
-    type_checker.check_program(&ast)
+    type_checker
+        .check_program(&ast)
         .map_err(|e| format!("Type error: {:?}", e))?;
-    
+
     // Generate R1CS
     let mut r1cs_generator = R1CSGenerator::new();
-    
+
     // Find proof and convert it
     for expr in &ast {
         if let Expression::Proof { .. } = expr {
-            r1cs_generator.convert_proof(expr)
+            r1cs_generator
+                .convert_proof(expr)
                 .map_err(|e| format!("R1CS error: {:?}", e))?;
             break;
         }
     }
-    
+
     Ok(r1cs_generator)
 }
 
@@ -43,9 +47,9 @@ fn test_simple_assertion() {
         output y: Field;
         assert y === x;
     }"#;
-    
+
     let r1cs = compile_to_r1cs(source).unwrap();
-    
+
     // Should have at least one constraint for the assertion
     assert!(!r1cs.constraints.is_empty());
     assert!(r1cs.pub_inputs.contains(&"x".to_string()));
@@ -59,9 +63,9 @@ fn test_constant_assertion() {
         output y: Field;
         assert y === 42;
     }"#;
-    
+
     let r1cs = compile_to_r1cs(source).unwrap();
-    
+
     // Should create constraint for the assertion
     assert!(!r1cs.constraints.is_empty());
     assert!(r1cs.pub_inputs.contains(&"y".to_string()));
@@ -77,9 +81,9 @@ fn test_basic_multiplication() {
         let product = x * y in
         assert z === product;
     }"#;
-    
+
     let r1cs = compile_to_r1cs(source).unwrap();
-    
+
     // Should have constraints for multiplication and assertion
     assert!(r1cs.constraints.len() >= 2);
     assert!(r1cs.pub_inputs.contains(&"x".to_string()));
@@ -97,11 +101,11 @@ fn test_addition_handling() {
         let sum = x + y in
         assert z === sum;
     }"#;
-    
+
     let r1cs = compile_to_r1cs(source).unwrap();
-    
+
     // Addition creates linear combination, then constraint for assertion
-    assert!(r1cs.constraints.len() >= 1);
+    assert!(!r1cs.constraints.is_empty());
     assert!(r1cs.pub_inputs.contains(&"x".to_string()));
     assert!(r1cs.pub_inputs.contains(&"y".to_string()));
     assert!(r1cs.pub_inputs.contains(&"z".to_string()));
@@ -116,9 +120,9 @@ fn test_witness_vs_public_inputs() {
         output y: Field;
         assert y === w;
     }"#;
-    
+
     let r1cs = compile_to_r1cs(source).unwrap();
-    
+
     // Check variable classification
     assert!(r1cs.pub_inputs.contains(&"x".to_string()));
     assert!(r1cs.pub_inputs.contains(&"y".to_string()));
@@ -138,9 +142,9 @@ fn test_multiple_assertions() {
         assert y === w;
         assert z === x;
     }"#;
-    
+
     let r1cs = compile_to_r1cs(source).unwrap();
-    
+
     // Should have separate constraints for each assertion (may have additional constraints)
     assert!(r1cs.constraints.len() >= 2);
 }
@@ -156,11 +160,11 @@ fn test_sequential_operations() {
         let step2 = step1 + 10 in
         assert result === step2;
     }"#;
-    
+
     let r1cs = compile_to_r1cs(source).unwrap();
-    
+
     // Addition operations should be combined into linear combinations
-    assert!(r1cs.constraints.len() >= 1); // At least the final assertion
+    assert!(!r1cs.constraints.is_empty()); // At least the final assertion
 }
 
 // ============================================================================
@@ -180,9 +184,9 @@ fn test_linearity_violation_detection() {
         assert y === temp1;
         assert z === temp2;
     }"#;
-    
+
     let result = compile_to_r1cs(source);
-    
+
     // Should fail due to variable consumption
     assert!(result.is_err());
 }
@@ -197,11 +201,11 @@ fn test_proper_variable_usage() {
         let sum = x + y in  // Both x and y consumed here
         assert result === sum;
     }"#;
-    
+
     let r1cs = compile_to_r1cs(source).unwrap();
-    
+
     // Should succeed with proper usage
-    assert!(r1cs.constraints.len() >= 1);
+    assert!(!r1cs.constraints.is_empty());
 }
 
 // ============================================================================
@@ -217,14 +221,14 @@ fn test_constraint_structure() {
         output c: Field;
         assert c === a * b;
     }"#;
-    
+
     let r1cs = compile_to_r1cs(source).unwrap();
-    
+
     // Verify constraint structure
     for constraint in &r1cs.constraints {
-        let has_content = !constraint.a.terms.is_empty() || 
-                         !constraint.b.terms.is_empty() || 
-                         !constraint.c.terms.is_empty();
+        let has_content = !constraint.a.terms.is_empty()
+            || !constraint.b.terms.is_empty()
+            || !constraint.c.terms.is_empty();
         assert!(has_content);
     }
 }
@@ -238,15 +242,15 @@ fn test_matrix_generation() {
         output z: Field;
         assert z === x + y;
     }"#;
-    
+
     let r1cs = compile_to_r1cs(source).unwrap();
     let (a_matrix, b_matrix, c_matrix) = r1cs.get_matrices();
-    
+
     // All matrices should have consistent dimensions
     assert_eq!(a_matrix.len(), r1cs.constraints.len());
     assert_eq!(b_matrix.len(), r1cs.constraints.len());
     assert_eq!(c_matrix.len(), r1cs.constraints.len());
-    
+
     // Check row consistency
     if !a_matrix.is_empty() {
         let width = a_matrix[0].len();
@@ -265,11 +269,14 @@ fn test_variable_organization() {
         witness wit1: Field;
         witness wit2: Field;
         output out1: Field;
-        assert out1 === pub1;
+
+        let temp1 = wit1 * 2 in
+        let temp2 = wit2 * 3 in
+        assert out1 === pub1
     }"#;
-    
+
     let r1cs = compile_to_r1cs(source).unwrap();
-    
+
     // Check variable organization
     assert!(r1cs.pub_inputs.contains(&"pub1".to_string()));
     assert!(r1cs.pub_inputs.contains(&"pub2".to_string()));
@@ -284,43 +291,58 @@ fn test_variable_organization() {
 
 #[test]
 fn test_linear_combination_structure() {
-    let lc1 = LinearCombination { 
-        terms: vec![("x".to_string(), 2), ("y".to_string(), 3)] 
+    let lc1 = LinearCombination {
+        terms: vec![
+            ("x".to_string(), BigInt::from(2)),
+            ("y".to_string(), BigInt::from(3)),
+        ],
     };
-    let lc2 = LinearCombination { 
-        terms: vec![("z".to_string(), 1)] 
+    let lc2 = LinearCombination {
+        terms: vec![("z".to_string(), BigInt::from(1))],
     };
-    
+
     // Test basic structure and access
     assert_eq!(lc1.terms.len(), 2);
-    assert_eq!(lc1.terms[0], ("x".to_string(), 2));
-    assert_eq!(lc1.terms[1], ("y".to_string(), 3));
-    
+    assert_eq!(lc1.terms[0], ("x".to_string(), BigInt::from(2)));
+    assert_eq!(lc1.terms[1], ("y".to_string(), BigInt::from(3)));
+
     assert_eq!(lc2.terms.len(), 1);
-    assert_eq!(lc2.terms[0], ("z".to_string(), 1));
+    assert_eq!(lc2.terms[0], ("z".to_string(), BigInt::from(1)));
 }
 
 #[test]
 fn test_r1cs_constraint_creation() {
-    let a = LinearCombination { terms: vec![("x".to_string(), 1)] };
-    let b = LinearCombination { terms: vec![("y".to_string(), 1)] };
-    let c = LinearCombination { terms: vec![("z".to_string(), 1)] };
-    
+    let a = LinearCombination {
+        terms: vec![("x".to_string(), BigInt::from(1))],
+    };
+    let b = LinearCombination {
+        terms: vec![("y".to_string(), BigInt::from(1))],
+    };
+    let c = LinearCombination {
+        terms: vec![("z".to_string(), BigInt::from(1))],
+    };
+
     let constraint = R1CSConstraint { a, b, c };
-    
-    assert_eq!(constraint.a.terms[0], ("x".to_string(), 1));
-    assert_eq!(constraint.b.terms[0], ("y".to_string(), 1)); 
-    assert_eq!(constraint.c.terms[0], ("z".to_string(), 1));
+
+    assert_eq!(constraint.a.terms[0], ("x".to_string(), BigInt::from(1)));
+    assert_eq!(constraint.b.terms[0], ("y".to_string(), BigInt::from(1)));
+    assert_eq!(constraint.c.terms[0], ("z".to_string(), BigInt::from(1)));
 }
 
 #[test]
 fn test_constraint_display_formatting() {
     let constraint = R1CSConstraint {
-        a: LinearCombination { terms: vec![("x".to_string(), 1)] },
-        b: LinearCombination { terms: vec![("ONE".to_string(), 1)] },
-        c: LinearCombination { terms: vec![("y".to_string(), 1)] },
+        a: LinearCombination {
+            terms: vec![("x".to_string(), BigInt::from(1))],
+        },
+        b: LinearCombination {
+            terms: vec![("ONE".to_string(), BigInt::from(1))],
+        },
+        c: LinearCombination {
+            terms: vec![("y".to_string(), BigInt::from(1))],
+        },
     };
-    
+
     let display_str = format!("{}", constraint);
     assert!(display_str.contains("x"));
     assert!(display_str.contains("ONE"));
@@ -335,11 +357,11 @@ fn test_large_constants() {
         output y: Field;
         assert y === x + 1000000;
     }"#;
-    
+
     let r1cs = compile_to_r1cs(source).unwrap();
-    
+
     // Should handle large constants without issue
-    assert!(r1cs.constraints.len() >= 1);
+    assert!(!r1cs.constraints.is_empty());
 }
 
 #[test]
@@ -350,11 +372,11 @@ fn test_zero_handling() {
         output y: Field;
         assert y === x + 0;
     }"#;
-    
+
     let r1cs = compile_to_r1cs(source).unwrap();
-    
+
     // Should handle zero constants
-    assert!(r1cs.constraints.len() >= 1);
+    assert!(!r1cs.constraints.is_empty());
 }
 
 // ============================================================================
@@ -374,12 +396,12 @@ fn test_complex_valid_proof() {
         assert intermediate === sum;
         assert result === intermediate;
     }"#;
-    
+
     let r1cs = compile_to_r1cs(source).unwrap();
-    
+
     // Complex proofs might generate additional constraints
     assert!(r1cs.constraints.len() >= 2);
-    
+
     // Verify variable categorization
     assert!(r1cs.pub_inputs.contains(&"a".to_string()));
     assert!(r1cs.pub_inputs.contains(&"b".to_string()));
@@ -395,9 +417,9 @@ fn test_r1cs_generator_state() {
         output y: Field;
         assert y === x;
     }"#;
-    
+
     let r1cs = compile_to_r1cs(source).unwrap();
-    
+
     // Test basic generator state
     assert!(!r1cs.constraints.is_empty());
     assert!(!r1cs.pub_inputs.is_empty());
@@ -419,9 +441,9 @@ fn test_constraint_count_accuracy() {
         assert y === b;
         assert z === c;
     }"#;
-    
+
     let r1cs = compile_to_r1cs(source).unwrap();
-    
+
     // Should have at least 3 constraints for 3 assertions
     assert!(r1cs.constraints.len() >= 3);
     assert_eq!(r1cs.pub_inputs.len(), 6); // 3 inputs + 3 outputs

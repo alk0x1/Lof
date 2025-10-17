@@ -1,122 +1,136 @@
-use std::path::PathBuf;
+use crate::ast::Expression;
 use crate::lexer::Lexer;
 use crate::parser::Parser;
-use crate::typechecker::{TypeChecker, TypeError};
-use crate::ast::Expression;
 use crate::r1cs::R1CSGenerator;
-use tracing::{info, warn, error, debug, instrument};
+use crate::typechecker::{TypeChecker, TypeError};
+use tracing::{debug, error, info, instrument, warn};
 
 #[derive(Debug)]
 pub enum CompilerError {
-  LexerError(String),
-  ParserError(String),
-  TypeCheckerError(TypeError),
-  R1CSError,
-  NoProofs,
+    LexerError(String),
+    ParserError(String),
+    TypeCheckerError(TypeError),
+    R1CSError,
+    NoProofs,
 }
 
 pub struct CompilerPipeline {
-  pub source: String,
+    pub source: String,
 }
 
 impl CompilerPipeline {
-  pub fn new(source: String, _verbose: bool) -> Self {
-    Self {
-      source,
-    }
-  }
-
-  #[instrument(skip(self, source_path))]
-  pub fn type_check_only(&self, source_path: &PathBuf) -> Result<(), CompilerError> {
-    info!("Starting type checking process");
-    
-    info!("Parsing source code");
-    let lexer = Lexer::new(&self.source);
-    let mut parser = Parser::new(lexer);
-    
-    let ast = parser.parse_program()
-      .map_err(|e| {
-        error!("Parsing failed: {}", e);
-        CompilerError::ParserError(format!("{:?}", e))
-      })?;
-        
-    if ast.is_empty() {
-      error!("No proofs found in source code");
-      return Err(CompilerError::NoProofs);
+    pub fn new(source: String, _verbose: bool) -> Self {
+        Self { source }
     }
 
-    info!("Parsing completed successfully");
+    #[instrument(skip(self, _source_path))]
+    pub fn type_check_only(&self, _source_path: &std::path::Path) -> Result<(), CompilerError> {
+        info!("Starting type checking process");
 
-    info!("Performing type checking...");
-    let mut type_checker = TypeChecker::new();
-    
-    type_checker.check_program(&ast).map_err(|e| {
-        error!("Type checking failed: {}", e);
-        CompilerError::TypeCheckerError(e)
-    })?;
+        info!("Parsing source code");
+        let lexer = Lexer::new(&self.source);
+        let mut parser = Parser::new(lexer);
 
-    info!("Type checking completed successfully");
+        let ast = parser.parse_program().map_err(|e| {
+            error!("Parsing failed: {}", e);
+            CompilerError::ParserError(format!("{:?}", e))
+        })?;
 
-    let proof_count = ast.iter().filter(|e| matches!(e, Expression::Proof {..})).count();
-    info!("Type checking successful! Summary: {} proof(s) parsed and type checked", proof_count);
+        if ast.is_empty() {
+            error!("No proofs found in source code");
+            return Err(CompilerError::NoProofs);
+        }
 
-    Ok(())
-  }
+        info!("Parsing completed successfully");
 
-  #[instrument(skip(self, source_path))]
-  pub fn run(&self, source_path: &PathBuf) -> Result<(), CompilerError> {
-    info!("Starting compilation process");
-    
-    // Step 1: Lexical Analysis and Parsing
-    info!("Parsing source code");
-    let lexer = Lexer::new(&self.source);
-    let mut parser = Parser::new(lexer);
-    
-    let ast = parser.parse_program()
-      .map_err(|e| {
-        error!("Parsing failed: {}", e);
-        CompilerError::ParserError(format!("{:?}", e))
-      })?;
-        
-    if ast.is_empty() {
-      error!("No proofs found in source code");
-      return Err(CompilerError::NoProofs);
+        info!("Performing type checking...");
+        let mut type_checker = TypeChecker::new();
+
+        type_checker.check_program(&ast).map_err(|e| {
+            error!("Type checking failed: {}", e);
+            CompilerError::TypeCheckerError(e)
+        })?;
+
+        info!("Type checking completed successfully");
+
+        let proof_count = ast
+            .iter()
+            .filter(|e| matches!(e, Expression::Proof { .. }))
+            .count();
+        info!(
+            "Type checking successful! Summary: {} proof(s) parsed and type checked",
+            proof_count
+        );
+
+        Ok(())
     }
 
-    info!("Parsing completed successfully");
+    #[instrument(skip(self, source_path))]
+    pub fn run(&self, source_path: &std::path::Path) -> Result<(), CompilerError> {
+        info!("Starting compilation process");
 
-    // Step 2: Type Checking
-    info!("Performing type checking...");
-    let mut type_checker = TypeChecker::new();
-    
-    type_checker.check_program(&ast).map_err(|e| {
-        error!("Type checking failed: {}", e);
-        CompilerError::TypeCheckerError(e)
-    })?;
+        // Step 1: Lexical Analysis and Parsing
+        info!("Parsing source code");
+        let lexer = Lexer::new(&self.source);
+        let mut parser = Parser::new(lexer);
 
-    info!("Type checking completed successfully");
+        let ast = parser.parse_program().map_err(|e| {
+            error!("Parsing failed: {}", e);
+            CompilerError::ParserError(format!("{:?}", e))
+        })?;
 
-    // Step 3: R1CS Generation
-    info!("Generating R1CS constraints...");
-    let mut r1cs_generator = R1CSGenerator::new();
-    
-    let file_stem = source_path.file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("output");
-    
-    for proof in &ast {
-      if let Expression::Proof { name, .. } = proof {
-        debug!("Converting proof '{}' to R1CS", name);
-        
-        match r1cs_generator.convert_proof(proof) {
-          Ok(_) => {
-            // Check for empty constraints
-            if r1cs_generator.constraints.is_empty() {
-              warn!("Proof '{}' generated no constraints", name);
+        if ast.is_empty() {
+            error!("No proofs found in source code");
+            return Err(CompilerError::NoProofs);
+        }
+
+        info!("Parsing completed successfully");
+
+        // Step 2: Type Checking
+        info!("Performing type checking...");
+        let mut type_checker = TypeChecker::new();
+
+        type_checker.check_program(&ast).map_err(|e| {
+            error!("Type checking failed: {}", e);
+            CompilerError::TypeCheckerError(e)
+        })?;
+
+        info!("Type checking completed successfully");
+
+        // Step 3: R1CS Generation
+        info!("Generating R1CS constraints...");
+        let mut r1cs_generator = R1CSGenerator::new();
+
+        let file_stem = source_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("output");
+
+        // First pass: Register all function definitions
+        for item in &ast {
+            if let Expression::FunctionDef {
+                name, params, body, ..
+            } = item
+            {
+                debug!("Registering function '{}'", name);
+                r1cs_generator.register_function(name.clone(), params.clone(), *body.clone());
             }
+        }
 
-            // Log statistics
-            debug!(
+        // Second pass: Convert proofs
+        for proof in &ast {
+            if let Expression::Proof { name, .. } = proof {
+                debug!("Converting proof '{}' to R1CS", name);
+
+                match r1cs_generator.convert_proof(proof) {
+                    Ok(_) => {
+                        // Check for empty constraints
+                        if r1cs_generator.constraints.is_empty() {
+                            warn!("Proof '{}' generated no constraints", name);
+                        }
+
+                        // Log statistics
+                        debug!(
               "Statistics for proof '{}': pub_inputs={:?}, witnesses={:?}, constraints={}",
               name,
               r1cs_generator.pub_inputs,
@@ -124,49 +138,52 @@ impl CompilerPipeline {
               r1cs_generator.constraints.len()
             );
 
-            // Generate R1CS file
-            let r1cs_path = source_path.with_file_name(format!("{}.r1cs", file_stem));
-            info!("Writing R1CS file to: {}", r1cs_path.display());
-            
-            match r1cs_generator.write_r1cs_file(&r1cs_path) {
-              Ok(size) => {
-                info!(
-                  "Successfully wrote {} bytes to {} ({} constraints)",
-                  size,
-                  r1cs_path.display(),
-                  r1cs_generator.constraints.len()
-                );
-                
-                // Log metadata
-                info!(
-                  "R1CS metadata: pub_inputs={}, witnesses={}, constraints={}",
-                  r1cs_generator.pub_inputs.len(),
-                  r1cs_generator.witnesses.len(),
-                  r1cs_generator.constraints.len()
-                );
-              },
-              Err(e) => {
-                error!("Failed to write R1CS file: {}", e);
-                return Err(CompilerError::R1CSError);
-              }
+                        // Generate R1CS file
+                        let r1cs_path = source_path.with_file_name(format!("{}.r1cs", file_stem));
+                        info!("Writing R1CS file to: {}", r1cs_path.display());
+
+                        match r1cs_generator.write_r1cs_file(&r1cs_path) {
+                            Ok(size) => {
+                                info!(
+                                    "Successfully wrote {} bytes to {} ({} constraints)",
+                                    size,
+                                    r1cs_path.display(),
+                                    r1cs_generator.constraints.len()
+                                );
+
+                                // Log metadata
+                                info!(
+                                    "R1CS metadata: pub_inputs={}, witnesses={}, constraints={}",
+                                    r1cs_generator.pub_inputs.len(),
+                                    r1cs_generator.witnesses.len(),
+                                    r1cs_generator.constraints.len()
+                                );
+                            }
+                            Err(e) => {
+                                error!("Failed to write R1CS file: {}", e);
+                                return Err(CompilerError::R1CSError);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!("R1CS generation failed for proof '{}': {}", name, e);
+                        return Err(CompilerError::R1CSError);
+                    }
+                }
             }
-          },
-          Err(e) => {
-            error!("R1CS generation failed for proof '{}': {}", name, e);
-            return Err(CompilerError::R1CSError);
-          }
         }
-      }
+
+        // Final compilation summary
+        let proof_count = ast
+            .iter()
+            .filter(|e| matches!(e, Expression::Proof { .. }))
+            .count();
+        info!(
+            "Compilation successful! Summary: {} proof(s) parsed, {} R1CS constraint(s) generated",
+            proof_count,
+            r1cs_generator.constraints.len()
+        );
+
+        Ok(())
     }
-
-    // Final compilation summary
-    let proof_count = ast.iter().filter(|e| matches!(e, Expression::Proof {..})).count();
-    info!(
-      "Compilation successful! Summary: {} proof(s) parsed, {} R1CS constraint(s) generated",
-      proof_count,
-      r1cs_generator.constraints.len()
-    );
-
-    Ok(())
-  }
 }

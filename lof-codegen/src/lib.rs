@@ -41,14 +41,15 @@ impl From<wasm::WasmError> for CodegenError {
 pub fn generate_code(config: CodegenConfig) -> Result<(), CodegenError> {
     // Validate config
     if !config.r1cs_path.exists() {
-        return Err(CodegenError::InvalidConfig(
-            format!("R1CS file not found: {}", config.r1cs_path.display())
-        ));
+        return Err(CodegenError::InvalidConfig(format!(
+            "R1CS file not found: {}",
+            config.r1cs_path.display()
+        )));
     }
-    
+
     if config.circuit_name.is_empty() {
         return Err(CodegenError::InvalidConfig(
-            "Circuit name cannot be empty".to_string()
+            "Circuit name cannot be empty".to_string(),
         ));
     }
 
@@ -92,7 +93,7 @@ mod tests {
             circuit_name: "".to_string(),
             target: CodegenTarget::Wasm,
         };
-        
+
         let result = generate_code(config);
         assert!(result.is_err());
     }

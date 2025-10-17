@@ -1,9 +1,14 @@
-use crate::ast::{Expression, Operator, Pattern, Type};
+use crate::ast::{ConstraintStatus, Expression, Operator, Pattern, Refinement, Type, Visibility};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 pub struct TypeChecker {
     symbols: HashMap<String, Type>,
+    /// Track which variables are witnesses (need constraint validation)
+    witnesses: HashSet<String>,
+    /// Track variable dependencies: var_name -> set of variables it depends on
+    /// This allows transitive constraint promotion through let bindings
+    dependencies: HashMap<String, HashSet<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -17,7 +22,9 @@ pub enum TypeError {
     NonBooleanInAssert(Type),
     EmptyMatchExpression,
     DuplicatePatternVariable(String),
-    InvalidExpression
+    InvalidExpression,
+    UnconstrainedWitness { name: String, witness_type: Type },
+    NonZeroRequired { found: Type },
 }
 
 impl fmt::Display for TypeError {
@@ -29,8 +36,14 @@ impl fmt::Display for TypeError {
             TypeError::TypeMismatch { expected, found } => {
                 write!(f, "Type mismatch: expected {}, found {}", expected, found)
             }
-            TypeError::EmptyMatchExpression => write!(f, "Match expression must have at least one pattern"),
-            TypeError::DuplicatePatternVariable(name) => write!(f, "Variable '{}' is bound multiple times in the same pattern", name),
+            TypeError::EmptyMatchExpression => {
+                write!(f, "Match expression must have at least one pattern")
+            }
+            TypeError::DuplicatePatternVariable(name) => write!(
+                f,
+                "Variable '{}' is bound multiple times in the same pattern",
+                name
+            ),
             TypeError::InvalidExpression => write!(f, "Invalid expression"),
             TypeError::ArgumentCountMismatch { expected, found } => {
                 write!(
@@ -49,7 +62,35 @@ impl fmt::Display for TypeError {
             TypeError::NonBooleanInAssert(found) => {
                 write!(f, "Assertion requires a boolean condition, found {}", found)
             }
+            TypeError::UnconstrainedWitness { name, witness_type } => {
+                write!(
+                    f,
+                    "Unconstrained witness '{}' of type {}\n\
+                     \nUnconstrained witnesses allow malicious provers to forge proofs.\n\
+                     \nHelp: Use '{}' in a constraint:\n\
+                     - Multiplication:  let result = {} * other\n\
+                     - Assertion:       assert {} > 0\n\
+                     - Match:           match {} with ...",
+                    name, witness_type, name, name, name, name
+                )
+            }
+            TypeError::NonZeroRequired { found } => {
+                write!(
+                    f,
+                    "inv() requires NonZero<field>, found {}\n\
+                     \nDivision by zero creates undefined behavior in circuits.\n\
+                     \nHelp: Add assertion before using inv():\n\
+                     assert denominator != 0;",
+                    found
+                )
+            }
         }
+    }
+}
+
+impl Default for TypeChecker {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -57,35 +98,153 @@ impl TypeChecker {
     pub fn new() -> Self {
         TypeChecker {
             symbols: HashMap::new(),
+            witnesses: HashSet::new(),
+            dependencies: HashMap::new(),
+        }
+    }
+
+    /// Helper: Create a field type with specified constraint status
+    fn field_type(constraint: ConstraintStatus, refinement: Option<Refinement>) -> Type {
+        Type::Field {
+            constraint,
+            refinement,
+        }
+    }
+
+    /// Helper: Create a bool type with specified constraint status
+    fn bool_type(constraint: ConstraintStatus) -> Type {
+        Type::Bool { constraint }
+    }
+
+    /// Helper: Check if two types are compatible, ignoring constraint status
+    fn is_field_type(typ: &Type) -> bool {
+        matches!(typ, Type::Field { .. })
+    }
+
+    fn is_bool_type(typ: &Type) -> bool {
+        matches!(typ, Type::Bool { .. })
+    }
+
+    /// Promote a type to constrained status (direct only, no transitive)
+    /// Used for assertions which don't create R1CS constraints by themselves
+    fn promote_to_constrained_direct(&mut self, var_name: &str) {
+        if let Some(typ) = self.symbols.get_mut(var_name) {
+            match typ {
+                Type::Field { constraint, .. } => {
+                    *constraint = ConstraintStatus::Constrained;
+                }
+                Type::Bool { constraint } => {
+                    *constraint = ConstraintStatus::Constrained;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Promote a type to constrained status
+    /// Also promotes all variables that this variable depends on (transitive)
+    /// Used for multiplication/division which create R1CS constraints
+    fn promote_to_constrained(&mut self, var_name: &str) {
+        // First promote dependencies
+        if let Some(deps) = self.dependencies.get(var_name).cloned() {
+            for dep in deps {
+                self.promote_to_constrained(&dep);
+            }
+        }
+
+        // Then promote the variable itself
+        if let Some(typ) = self.symbols.get_mut(var_name) {
+            match typ {
+                Type::Field { constraint, .. } => {
+                    *constraint = ConstraintStatus::Constrained;
+                }
+                Type::Bool { constraint } => {
+                    *constraint = ConstraintStatus::Constrained;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Promote a type to NonZero refinement (also promotes to constrained)
+    #[allow(dead_code, clippy::collapsible_match)]
+    fn promote_to_nonzero(&mut self, var_name: &str) {
+        if let Some(typ) = self.symbols.get_mut(var_name) {
+            if let Type::Field {
+                constraint,
+                refinement,
+            } = typ
+            {
+                *constraint = ConstraintStatus::Constrained;
+                *refinement = Some(Refinement::NonZero);
+            }
+        }
+    }
+
+    /// Extract variable names from an expression (for constraint promotion)
+    #[allow(clippy::only_used_in_recursion)]
+    fn extract_vars(&self, expr: &Expression, vars: &mut HashSet<String>) {
+        match expr {
+            Expression::Variable(name) => {
+                vars.insert(name.clone());
+            }
+            Expression::BinaryOp { left, right, .. } => {
+                self.extract_vars(left, vars);
+                self.extract_vars(right, vars);
+            }
+            Expression::Tuple(elements) => {
+                for elem in elements {
+                    self.extract_vars(elem, vars);
+                }
+            }
+            Expression::ArrayIndex { array, index } => {
+                self.extract_vars(array, vars);
+                self.extract_vars(index, vars);
+            }
+            _ => {}
         }
     }
 
     fn read_variable(&self, name: &str) -> Result<Type, TypeError> {
-        let var_type = self.symbols.get(name)
+        let var_type = self
+            .symbols
+            .get(name)
             .cloned()
             .ok_or_else(|| TypeError::UndefinedVariable(name.to_string()))?;
-        
+
         Ok(var_type)
     }
 
+    #[allow(clippy::only_used_in_recursion)]
     fn check_pattern_compatibility(&self, pattern: &Pattern, typ: &Type) -> Result<(), TypeError> {
         match (pattern, typ) {
             (Pattern::Variable(_), _) | (Pattern::Wildcard, _) => Ok(()),
-            (Pattern::Literal(_), Type::Field) => Ok(()),
+            (Pattern::Literal(_), Type::Field { .. }) => Ok(()),
             (Pattern::Tuple(patterns), Type::Tuple(types)) => {
                 if patterns.len() != types.len() {
-                    return Err(TypeError::PatternMismatch { expected: typ.clone(), found: pattern.clone() });
+                    return Err(TypeError::PatternMismatch {
+                        expected: typ.clone(),
+                        found: pattern.clone(),
+                    });
                 }
                 for (p, t) in patterns.iter().zip(types.iter()) {
                     self.check_pattern_compatibility(p, t)?;
                 }
                 Ok(())
             }
-            _ => Err(TypeError::PatternMismatch { expected: typ.clone(), found: pattern.clone() }),
+            _ => Err(TypeError::PatternMismatch {
+                expected: typ.clone(),
+                found: pattern.clone(),
+            }),
         }
     }
-    
-    fn check_pattern_duplicates(&self, pattern: &Pattern, bound_vars: &mut HashSet<String>) -> Result<(), TypeError> {
+
+    #[allow(clippy::only_used_in_recursion)]
+    fn check_pattern_duplicates(
+        &self,
+        pattern: &Pattern,
+        bound_vars: &mut HashSet<String>,
+    ) -> Result<(), TypeError> {
         match pattern {
             Pattern::Variable(name) => {
                 if bound_vars.contains(name) {
@@ -104,30 +263,77 @@ impl TypeChecker {
             _ => Ok(()),
         }
     }
-    
+
+    #[allow(clippy::only_used_in_recursion)]
     fn types_compatible(&self, type1: &Type, type2: &Type) -> bool {
-        type1 == type2
+        // Compare types while ignoring constraint status and refinements
+        // This allows field^unconstrained to be compatible with field^constrained
+        match (type1, type2) {
+            (Type::Field { .. }, Type::Field { .. }) => true,
+            (Type::Bool { .. }, Type::Bool { .. }) => true,
+            (Type::Tuple(t1), Type::Tuple(t2)) => {
+                t1.len() == t2.len()
+                    && t1
+                        .iter()
+                        .zip(t2.iter())
+                        .all(|(a, b)| self.types_compatible(a, b))
+            }
+            (
+                Type::Array {
+                    element_type: e1,
+                    size: s1,
+                },
+                Type::Array {
+                    element_type: e2,
+                    size: s2,
+                },
+            ) => s1 == s2 && self.types_compatible(e1, e2),
+            (
+                Type::Function {
+                    params: p1,
+                    return_type: r1,
+                },
+                Type::Function {
+                    params: p2,
+                    return_type: r2,
+                },
+            ) => {
+                p1.len() == p2.len()
+                    && p1
+                        .iter()
+                        .zip(p2.iter())
+                        .all(|(a, b)| self.types_compatible(a, b))
+                    && self.types_compatible(r1, r2)
+            }
+            _ => type1 == type2,
+        }
     }
-    
+
     pub fn check_program(&mut self, program: &[Expression]) -> Result<(), TypeError> {
         for expr in program {
-            if let Expression::FunctionDef { name, params, return_type, .. } = expr {
+            if let Expression::FunctionDef {
+                name,
+                params,
+                return_type,
+                ..
+            } = expr
+            {
                 let resolved_params = params
                     .iter()
                     .map(|p| self.resolve_type(&p.typ))
                     .collect::<Result<Vec<_>, _>>()?;
                 let resolved_return_type = self.resolve_type(return_type)?;
-                
+
                 let function_type = if resolved_params.is_empty() {
                     resolved_return_type
                 } else {
                     self.build_curried_function_type(resolved_params, resolved_return_type)
                 };
-                
+
                 self.symbols.insert(name.clone(), function_type);
             }
         }
-    
+
         for expr in program {
             self.check_expression(expr)?;
         }
@@ -152,23 +358,29 @@ impl TypeChecker {
             result
         }
     }
-    
-    fn apply_function(&mut self, mut function_type: Type, arguments: &[Expression]) -> Result<Type, TypeError> {
+
+    fn apply_function(
+        &mut self,
+        mut function_type: Type,
+        arguments: &[Expression],
+    ) -> Result<Type, TypeError> {
         if arguments.is_empty() {
             return Ok(function_type);
         }
-    
+
         for _ in arguments {
             match function_type {
-                Type::Function { params, return_type } => {
+                Type::Function {
+                    params,
+                    return_type,
+                } => {
                     if params.len() != 1 {
                         return Err(TypeError::ArgumentCountMismatch {
                             expected: 1,
                             found: params.len(),
                         });
                     }
-                    
-                    
+
                     function_type = *return_type;
                 }
                 _ => {
@@ -179,53 +391,69 @@ impl TypeChecker {
                 }
             }
         }
-        
+
         Ok(function_type)
     }
-    
+
     pub fn check_expression(&mut self, expr: &Expression) -> Result<Type, TypeError> {
         match expr {
-            Expression::Number(_) => Ok(Type::Field),
-            Expression::Variable(name) => {
-                self.read_variable(name)
-            }
-            Expression::Let { pattern, value, body } => {
+            Expression::Number(_) => Ok(Self::field_type(ConstraintStatus::Constrained, None)),
+            Expression::Variable(name) => self.read_variable(name),
+            Expression::Let {
+                pattern,
+                value,
+                body,
+            } => {
                 let value_type = self.check_expression(value)?;
                 let mut symbols_backup = HashMap::new();
-                
+
                 match pattern {
                     Pattern::Variable(var_name) => {
                         if let Some(old_type) = self.symbols.get(var_name) {
                             symbols_backup.insert(var_name.clone(), old_type.clone());
                         }
                         self.symbols.insert(var_name.clone(), value_type.clone());
+
+                        // ALWAYS track dependencies through let bindings
+                        // This allows transitive promotion: if sum_0 depends on x,
+                        // and sum_0 is promoted, then x gets promoted too
+                        let mut deps = HashSet::new();
+                        self.extract_vars(value, &mut deps);
+                        if !deps.is_empty() {
+                            self.dependencies.insert(var_name.clone(), deps);
+                        }
                     }
                     _ => {
                         self.bind_pattern(pattern, &value_type)?;
                     }
                 }
-                
+
                 let body_type = self.check_expression(body)?;
-                
-                match pattern {
-                    Pattern::Variable(var_name) => {
-                        if let Some(old_type) = symbols_backup.get(var_name) {
-                            self.symbols.insert(var_name.clone(), old_type.clone());
-                        } else {
-                            self.symbols.remove(var_name);
-                        }
-                    }
-                    _ => {
+
+                if let Pattern::Variable(var_name) = pattern {
+                    if let Some(old_type) = symbols_backup.get(var_name) {
+                        self.symbols.insert(var_name.clone(), old_type.clone());
+                    } else {
+                        self.symbols.remove(var_name);
                     }
                 }
-                
+
                 Ok(body_type)
             }
             Expression::BinaryOp { left, op, right } => {
                 let left_type = self.check_expression(left)?;
                 let right_type = self.check_expression(right)?;
-                
-                
+
+                // For multiplication and division, promote variables to constrained
+                if matches!(op, Operator::Mul | Operator::Div) {
+                    let mut vars = HashSet::new();
+                    self.extract_vars(left, &mut vars);
+                    self.extract_vars(right, &mut vars);
+                    for var in vars {
+                        self.promote_to_constrained(&var);
+                    }
+                }
+
                 self.check_operator(op, &left_type, &right_type)
             }
             Expression::Tuple(elements) => {
@@ -237,25 +465,54 @@ impl TypeChecker {
             }
             Expression::Assert(condition) => {
                 let cond_type = self.check_expression(condition)?;
-                if cond_type != Type::Bool {
+                if !Self::is_bool_type(&cond_type) {
                     return Err(TypeError::NonBooleanInAssert(cond_type));
                 }
+
+                // Promote all variables in the condition to constrained
+                // For constraint equality (===), promote transitively because they create R1CS constraints
+                // For comparison assertions (>, <, ==, etc.), only promote direct variables
+                let use_transitive = matches!(
+                    condition.as_ref(),
+                    Expression::BinaryOp {
+                        op: Operator::Assert,
+                        ..
+                    }
+                );
+
+                let mut vars = HashSet::new();
+                self.extract_vars(condition, &mut vars);
+                for var in vars {
+                    if use_transitive {
+                        self.promote_to_constrained(&var);
+                    } else {
+                        self.promote_to_constrained_direct(&var);
+                    }
+                }
+
                 Ok(Type::Unit)
             }
-            Expression::FunctionDef { name: _, body, params, return_type } => {
+            Expression::FunctionDef {
+                name: _,
+                body,
+                params,
+                return_type,
+            } => {
                 let original_symbols = self.symbols.clone();
 
                 for param in params.iter() {
                     let resolved_param_type = self.resolve_type(&param.typ)?;
                     self.symbols.insert(param.name.clone(), resolved_param_type);
                 }
-                
+
                 let body_type = self.check_expression(body)?;
                 self.symbols = original_symbols;
-                
+
                 let expected_return_type = self.resolve_type(return_type)?;
-                
-                if body_type != expected_return_type {
+
+                // Use compatibility check instead of exact equality
+                // This allows field^constrained to match field^unconstrained in return types
+                if !self.types_compatible(&body_type, &expected_return_type) {
                     return Err(TypeError::TypeMismatch {
                         expected: expected_return_type,
                         found: body_type,
@@ -263,25 +520,79 @@ impl TypeChecker {
                 }
                 Ok(Type::Unit)
             }
-            Expression::FunctionCall { function, arguments } => {
-                let function_type = self.symbols.get(function)
+            Expression::FunctionCall {
+                function,
+                arguments,
+            } => {
+                let function_type = self
+                    .symbols
+                    .get(function)
                     .cloned()
                     .ok_or_else(|| TypeError::UndefinedFunction(function.clone()))?;
-                
+
                 self.apply_function(function_type, arguments)
             }
             Expression::Proof { signals, body, .. } => {
+                // Track witnesses for constraint validation
                 for signal in signals {
                     let resolved_type = self.resolve_type(&signal.typ)?;
-                    self.symbols.insert(signal.name.clone(), resolved_type);
+
+                    // Inputs and outputs are inherently constrained (they're public)
+                    let final_type = if signal.visibility == Visibility::Input
+                        || signal.visibility == Visibility::Output
+                    {
+                        match resolved_type {
+                            Type::Field { refinement, .. } => {
+                                Self::field_type(ConstraintStatus::Constrained, refinement)
+                            }
+                            Type::Bool { .. } => Self::bool_type(ConstraintStatus::Constrained),
+                            other => other,
+                        }
+                    } else {
+                        resolved_type
+                    };
+
+                    self.symbols.insert(signal.name.clone(), final_type);
+
+                    // Track witnesses for later validation (NOT inputs or outputs)
+                    if signal.visibility == Visibility::Witness {
+                        self.witnesses.insert(signal.name.clone());
+                    }
                 }
-            
+
                 let _body_type = self.check_expression(body)?;
-            
-            
+
+                // Validate all witnesses are constrained
+                for witness_name in &self.witnesses {
+                    if let Some(typ) = self.symbols.get(witness_name) {
+                        let is_unconstrained = matches!(
+                            typ,
+                            Type::Field {
+                                constraint: ConstraintStatus::Unconstrained,
+                                ..
+                            } | Type::Bool {
+                                constraint: ConstraintStatus::Unconstrained
+                            }
+                        );
+
+                        if is_unconstrained {
+                            return Err(TypeError::UnconstrainedWitness {
+                                name: witness_name.clone(),
+                                witness_type: typ.clone(),
+                            });
+                        }
+                    }
+                }
+
+                // Clear witnesses for next proof block
+                self.witnesses.clear();
+
                 Ok(Type::Unit)
             }
-            Expression::Block { statements, final_expr } => {
+            Expression::Block {
+                statements,
+                final_expr,
+            } => {
                 for stmt in statements {
                     self.check_expression(stmt)?;
                 }
@@ -290,33 +601,40 @@ impl TypeChecker {
                 } else {
                     Type::Unit
                 };
-                
+
                 Ok(result_type)
             }
             Expression::Match { value, patterns } => {
                 if patterns.is_empty() {
                     return Err(TypeError::EmptyMatchExpression);
                 }
-                
+
                 let scrutinee_type = self.check_expression(value)?;
-                
+
+                // Match expressions create selector constraints, so promote scrutinee
+                let mut vars = HashSet::new();
+                self.extract_vars(value, &mut vars);
+                for var in vars {
+                    self.promote_to_constrained(&var);
+                }
+
                 let mut arm_types = Vec::new();
-                
+
                 for pattern_arm in patterns {
                     let original_symbols = self.symbols.clone();
-                    
+
                     self.check_pattern_compatibility(&pattern_arm.pattern, &scrutinee_type)?;
                     self.bind_pattern(&pattern_arm.pattern, &scrutinee_type)?;
-                    
+
                     let arm_type = self.check_expression(&pattern_arm.body)?;
                     arm_types.push(arm_type);
-                    
+
                     self.symbols = original_symbols;
                 }
-                
+
                 if let Some(first_type) = arm_types.first() {
                     for arm_type in arm_types.iter().skip(1) {
-                        if !self.types_compatible(&first_type, arm_type) {
+                        if !self.types_compatible(first_type, arm_type) {
                             return Err(TypeError::TypeMismatch {
                                 expected: first_type.clone(),
                                 found: arm_type.clone(),
@@ -328,15 +646,94 @@ impl TypeChecker {
                     Err(TypeError::EmptyMatchExpression)
                 }
             }
-            _ => todo!("Type checking for this expression is not yet implemented: {:?}", expr),
+            Expression::ArrayLiteral(elements) => {
+                if elements.is_empty() {
+                    // Empty array - we can't infer the type
+                    return Err(TypeError::InvalidExpression);
+                }
+
+                // Check all elements have the same type
+                let first_type = self.check_expression(&elements[0])?;
+                for elem in elements.iter().skip(1) {
+                    let elem_type = self.check_expression(elem)?;
+                    if !self.types_compatible(&first_type, &elem_type) {
+                        return Err(TypeError::TypeMismatch {
+                            expected: first_type.clone(),
+                            found: elem_type,
+                        });
+                    }
+                }
+
+                // Return array type
+                Ok(Type::Array {
+                    element_type: Box::new(first_type),
+                    size: elements.len(),
+                })
+            }
+
+            Expression::ArrayIndex { array, index } => {
+                let array_type = self.check_expression(array)?;
+                let index_type = self.check_expression(index)?;
+
+                // Index must be a field (we'll use it as integer)
+                if !Self::is_field_type(&index_type) {
+                    return Err(TypeError::TypeMismatch {
+                        expected: Self::field_type(ConstraintStatus::Constrained, None),
+                        found: index_type,
+                    });
+                }
+
+                // Array access creates constraints, so promote index to constrained
+                if let Expression::Variable(var_name) = index.as_ref() {
+                    self.promote_to_constrained(var_name);
+                }
+
+                // Array must be an array type
+                match array_type {
+                    Type::Array { element_type, .. } => Ok(*element_type),
+                    _ => Err(TypeError::TypeMismatch {
+                        expected: Type::Array {
+                            element_type: Box::new(Self::field_type(
+                                ConstraintStatus::Constrained,
+                                None,
+                            )),
+                            size: 0,
+                        },
+                        found: array_type,
+                    }),
+                }
+            }
+
+            Expression::TypeAlias { .. } => {
+                // Type aliases don't have a runtime value
+                Ok(Type::Unit)
+            }
+
+            Expression::EnumDef { .. } => {
+                // Enum definitions don't have a runtime value
+                Ok(Type::Unit)
+            }
+
+            Expression::Component { signals, body, .. } => {
+                // Component is similar to proof - define signals and check body
+                for signal in signals {
+                    let resolved_type = self.resolve_type(&signal.typ)?;
+                    self.symbols.insert(signal.name.clone(), resolved_type);
+                }
+
+                let _body_type = self.check_expression(body)?;
+
+                Ok(Type::Unit)
+            }
         }
     }
 
+    #[allow(clippy::only_used_in_recursion)]
     fn resolve_type(&self, typ: &Type) -> Result<Type, TypeError> {
         match typ {
             Type::Identifier(name) => match name.as_str() {
-                "field" => Ok(Type::Field),
-                "bool" => Ok(Type::Bool),
+                "field" => Ok(Self::field_type(ConstraintStatus::Unconstrained, None)),
+                "bool" => Ok(Self::bool_type(ConstraintStatus::Unconstrained)),
                 "unit" => Ok(Type::Unit),
                 _ => Err(TypeError::UndefinedType(name.clone())),
             },
@@ -354,7 +751,7 @@ impl TypeChecker {
     fn bind_pattern(&mut self, pattern: &Pattern, typ: &Type) -> Result<(), TypeError> {
         let mut bound_vars = HashSet::new();
         self.check_pattern_duplicates(pattern, &mut bound_vars)?;
-        
+
         match (pattern, typ) {
             (Pattern::Variable(name), _) => {
                 self.symbols.insert(name.clone(), typ.clone());
@@ -367,69 +764,137 @@ impl TypeChecker {
                 }
                 Ok(())
             }
-            _ => Err(TypeError::PatternMismatch { expected: typ.clone(), found: pattern.clone() }),
+            _ => Err(TypeError::PatternMismatch {
+                expected: typ.clone(),
+                found: pattern.clone(),
+            }),
         }
     }
 
-    fn check_operator(&mut self, op: &Operator, left: &Type, right: &Type) -> Result<Type, TypeError> {
+    fn check_operator(
+        &mut self,
+        op: &Operator,
+        left: &Type,
+        right: &Type,
+    ) -> Result<Type, TypeError> {
         match op {
-            Operator::Add | Operator::Sub | Operator::Mul | Operator::Div => {
-                let left_is_field = matches!(left, Type::Field);
-                let right_is_field = matches!(right, Type::Field);
-                
+            Operator::Add | Operator::Sub => {
+                // Addition and subtraction DO NOT promote to constrained (just linear combinations)
+                let left_is_field = Self::is_field_type(left);
+                let right_is_field = Self::is_field_type(right);
+
                 if left_is_field && right_is_field {
-                    Ok(Type::Field)
+                    // Result inherits the "least constrained" status
+                    Ok(Self::field_type(ConstraintStatus::Unconstrained, None))
                 } else {
-                    Err(TypeError::TypeMismatch { 
-                        expected: Type::Field, 
-                        found: if !left_is_field { left.clone() } else { right.clone() } 
+                    Err(TypeError::TypeMismatch {
+                        expected: Self::field_type(ConstraintStatus::Constrained, None),
+                        found: if !left_is_field {
+                            left.clone()
+                        } else {
+                            right.clone()
+                        },
                     })
                 }
             }
-    
+
+            Operator::Mul | Operator::Div => {
+                // Multiplication and division CREATE R1CS constraints, so promote operands
+                let left_is_field = Self::is_field_type(left);
+                let right_is_field = Self::is_field_type(right);
+
+                if left_is_field && right_is_field {
+                    // NOTE: Actual variable promotion happens in BinaryOp expression handling
+                    Ok(Self::field_type(ConstraintStatus::Constrained, None))
+                } else {
+                    Err(TypeError::TypeMismatch {
+                        expected: Self::field_type(ConstraintStatus::Constrained, None),
+                        found: if !left_is_field {
+                            left.clone()
+                        } else {
+                            right.clone()
+                        },
+                    })
+                }
+            }
+
             Operator::Equal | Operator::NotEqual => {
-                if left == right {
-                    Ok(Type::Bool)
+                // Comparison operators return bool but DON'T constrain operands
+                // They only constrain when used in assertions (via extract_vars)
+                if self.types_compatible(left, right) {
+                    Ok(Self::bool_type(ConstraintStatus::Unconstrained))
                 } else {
-                    Err(TypeError::TypeMismatch { expected: left.clone(), found: right.clone() })
-                }
-            }
-    
-            Operator::Lt | Operator::Gt | Operator::Le | Operator::Ge => {
-                let left_is_field = matches!(left, Type::Field);
-                let right_is_field = matches!(right, Type::Field);
-                
-                if left_is_field && right_is_field {
-                    Ok(Type::Bool)
-                } else {
-                    Err(TypeError::TypeMismatch { 
-                        expected: Type::Field, 
-                        found: if !left_is_field { left.clone() } else { right.clone() } 
+                    Err(TypeError::TypeMismatch {
+                        expected: left.clone(),
+                        found: right.clone(),
                     })
                 }
             }
-            
-            Operator::And | Operator::Or => {
-                if *left == Type::Bool && *right == Type::Bool {
-                    Ok(Type::Bool)
+
+            Operator::Lt | Operator::Gt | Operator::Le | Operator::Ge => {
+                let left_is_field = Self::is_field_type(left);
+                let right_is_field = Self::is_field_type(right);
+
+                if left_is_field && right_is_field {
+                    // Comparisons return unconstrained bool
+                    // They only constrain when used in assertions (via extract_vars)
+                    Ok(Self::bool_type(ConstraintStatus::Unconstrained))
                 } else {
-                    Err(TypeError::TypeMismatch { expected: Type::Bool, found: if *left != Type::Bool { left.clone() } else { right.clone() } })
+                    Err(TypeError::TypeMismatch {
+                        expected: Self::field_type(ConstraintStatus::Constrained, None),
+                        found: if !left_is_field {
+                            left.clone()
+                        } else {
+                            right.clone()
+                        },
+                    })
+                }
+            }
+
+            Operator::And | Operator::Or => {
+                if Self::is_bool_type(left) && Self::is_bool_type(right) {
+                    // Logical operators return unconstrained bool
+                    // They only constrain when used in assertions (via extract_vars)
+                    Ok(Self::bool_type(ConstraintStatus::Unconstrained))
+                } else {
+                    Err(TypeError::TypeMismatch {
+                        expected: Self::bool_type(ConstraintStatus::Constrained),
+                        found: if !Self::is_bool_type(left) {
+                            left.clone()
+                        } else {
+                            right.clone()
+                        },
+                    })
                 }
             }
 
             Operator::Not => {
-                if *right == Type::Bool {
-                    Ok(Type::Bool)
+                if Self::is_bool_type(right) {
+                    // NOT operator returns unconstrained bool
+                    // It only constrains when used in assertions (via extract_vars)
+                    Ok(Self::bool_type(ConstraintStatus::Unconstrained))
                 } else {
-                    Err(TypeError::TypeMismatch { expected: Type::Bool, found: right.clone() })
+                    Err(TypeError::TypeMismatch {
+                        expected: Self::bool_type(ConstraintStatus::Constrained),
+                        found: right.clone(),
+                    })
                 }
             }
 
             Operator::Assert => {
-                if self.types_compatible(left, right) {
-                    Ok(Type::Bool)
+                // For === operator, allow Bool to be compatible with field
+                // since booleans are represented as 0/1 field elements in R1CS
+                let compatible = self.types_compatible(left, right)
+                    || (Self::is_bool_type(left) && Self::is_field_type(right))
+                    || (Self::is_field_type(left) && Self::is_bool_type(right));
+
+                if compatible {
+                    Ok(Self::bool_type(ConstraintStatus::Constrained))
                 } else {
-                    Err(TypeError::TypeMismatch { expected: left.clone(), found: right.clone() })
+                    Err(TypeError::TypeMismatch {
+                        expected: left.clone(),
+                        found: right.clone(),
+                    })
                 }
             }
         }

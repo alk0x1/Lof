@@ -1,12 +1,13 @@
-use lof::parser::Parser;
+use lof::ast::{Expression, Type, Visibility};
 use lof::lexer::Lexer;
-use lof::ast::{Expression, Visibility, Type};
+use lof::parser::Parser;
 
 fn parse_source(source: &str) -> Result<Vec<Expression>, String> {
     let lexer = Lexer::new(source);
     let mut parser = Parser::new(lexer);
-    
-    parser.parse_program()
+
+    parser
+        .parse_program()
         .map_err(|e| format!("Parse error: {:?}", e))
 }
 
@@ -18,19 +19,19 @@ fn test_parse_simple_proof() {
         output y: Field;
         assert y === x
     }"#;
-    
+
     let result = parse_source(source).unwrap();
     assert_eq!(result.len(), 1);
-    
+
     match &result[0] {
         Expression::Proof { name, signals, .. } => {
             assert_eq!(name, "SimpleProof");
             assert_eq!(signals.len(), 2);
-            
+
             assert_eq!(signals[0].name, "x");
             assert_eq!(signals[0].visibility, Visibility::Input);
-            
-            assert_eq!(signals[1].name, "y");  
+
+            assert_eq!(signals[1].name, "y");
             assert_eq!(signals[1].visibility, Visibility::Output);
         }
         _ => panic!("Expected Proof, got {:?}", result[0]),
@@ -48,15 +49,15 @@ fn test_parse_proof_with_witness() {
         let temp = a * w in
         assert result === temp
     }"#;
-    
+
     let result = parse_source(source).unwrap();
     assert_eq!(result.len(), 1);
-    
+
     match &result[0] {
         Expression::Proof { name, signals, .. } => {
             assert_eq!(name, "TestProof");
             assert_eq!(signals.len(), 3);
-            
+
             assert_eq!(signals[0].visibility, Visibility::Input);
             assert_eq!(signals[1].visibility, Visibility::Witness);
             assert_eq!(signals[2].visibility, Visibility::Output);
@@ -77,10 +78,10 @@ fn test_parse_proof_with_binary_operations() {
         let prod = diff * 2 in
         assert result === prod
     }"#;
-    
+
     let result: Vec<Expression> = parse_source(source).unwrap();
     assert_eq!(result.len(), 1);
-    
+
     match &result[0] {
         Expression::Proof { name, .. } => {
             assert_eq!(name, "ArithmeticTest");
@@ -94,10 +95,10 @@ fn test_parse_function_definition() {
     let source = r#"
 let square (x: Field): Field = x * x
     "#;
-    
+
     let result = parse_source(source).unwrap();
     assert_eq!(result.len(), 1);
-    
+
     match &result[0] {
         Expression::FunctionDef { name, params, .. } => {
             assert_eq!(name, "square");
@@ -116,10 +117,10 @@ fn test_parse_proof_with_function_call() {
         output result: Field;
         assert result === square(a);
     }"#;
-    
+
     let result = parse_source(source).unwrap();
     assert_eq!(result.len(), 1);
-    
+
     match &result[0] {
         Expression::Proof { name, .. } => {
             assert_eq!(name, "FunctionCallTest");
@@ -140,10 +141,10 @@ fn test_parse_proof_with_pattern_matching() {
         in
         assert y === result;
     }"#;
-    
+
     let result = parse_source(source).unwrap();
     assert_eq!(result.len(), 1);
-    
+
     match &result[0] {
         Expression::Proof { name, .. } => {
             assert_eq!(name, "PatternMatchTest");
@@ -167,10 +168,10 @@ fn test_parse_multiple_proofs() {
         assert b === a * 2;
     }
     "#;
-    
+
     let result = parse_source(source).unwrap();
     assert_eq!(result.len(), 2);
-    
+
     match (&result[0], &result[1]) {
         (Expression::Proof { name: name1, .. }, Expression::Proof { name: name2, .. }) => {
             assert_eq!(name1, "FirstProof");
@@ -191,12 +192,17 @@ proof UseFunction {
     assert result === double(value);
 }
     "#;
-    
+
     let result = parse_source(source).unwrap();
     assert_eq!(result.len(), 2);
-    
+
     match (&result[0], &result[1]) {
-        (Expression::FunctionDef { name, .. }, Expression::Proof { name: proof_name, .. }) => {
+        (
+            Expression::FunctionDef { name, .. },
+            Expression::Proof {
+                name: proof_name, ..
+            },
+        ) => {
             assert_eq!(name, "double");
             assert_eq!(proof_name, "UseFunction");
         }
@@ -212,10 +218,10 @@ fn test_parse_empty_proof() {
         assert y === 42;
     }
     "#;
-    
+
     let result = parse_source(source).unwrap();
     assert_eq!(result.len(), 1);
-    
+
     match &result[0] {
         Expression::Proof { signals, .. } => {
             assert_eq!(signals.len(), 1);
@@ -235,10 +241,10 @@ fn test_parse_proof_with_nested_expressions() {
         output result: Field;
         assert result === (a + b) * c;
     }"#;
-    
+
     let result = parse_source(source).unwrap();
     assert_eq!(result.len(), 1);
-    
+
     match &result[0] {
         Expression::Proof { name, .. } => {
             assert_eq!(name, "NestedTest");
@@ -257,10 +263,10 @@ fn test_parse_constants_in_proof() {
         let added = doubled + 5 in
         assert y === added;
     }"#;
-    
+
     let result = parse_source(source).unwrap();
     assert_eq!(result.len(), 1);
-    
+
     match &result[0] {
         Expression::Proof { name, .. } => {
             assert_eq!(name, "ConstantsTest");
@@ -286,7 +292,7 @@ proof MinimalTest {
     output y: Field;
     assert y === x
 }"#;
-    
+
     let result = parse_source(source);
     if let Err(e) = &result {
         println!("Debug error: {:?}", e);
@@ -305,10 +311,10 @@ fn test_parse_comparison_operators() {
         assert x != 0;
         assert y < 100;
     }"#;
-    
+
     let result = parse_source(source).unwrap();
     assert_eq!(result.len(), 1);
-    
+
     match &result[0] {
         Expression::Proof { name, .. } => {
             assert_eq!(name, "ComparisonTest");
@@ -418,7 +424,14 @@ fn test_parse_multiple_components_and_proofs() {
     assert_eq!(result.len(), 2);
 
     match (&result[0], &result[1]) {
-        (Expression::Component { name: comp_name, .. }, Expression::Proof { name: proof_name, .. }) => {
+        (
+            Expression::Component {
+                name: comp_name, ..
+            },
+            Expression::Proof {
+                name: proof_name, ..
+            },
+        ) => {
             assert_eq!(comp_name, "Adder");
             assert_eq!(proof_name, "UseAdder");
         }
@@ -444,18 +457,12 @@ fn test_parse_division_operator() {
         Expression::Proof { body, .. } => {
             // Verify that the division operator is parsed in the body
             // We expect the assertion to contain a BinaryOp with Div operator
-            match body.as_ref() {
-                Expression::Assert(expr) => {
-                    match expr.as_ref() {
-                        Expression::BinaryOp { .. } => {
-                            // The outermost operation is ===, but we check that division is parsed
-                            // The right side should contain division
-                            assert!(true); // If we got here, parsing succeeded
-                        }
-                        _ => {}
-                    }
+            if let Expression::Assert(expr) = body.as_ref() {
+                if let Expression::BinaryOp { .. } = expr.as_ref() {
+                    // The outermost operation is ===, but we check that division is parsed
+                    // The right side should contain division
+                    // If we got here, parsing succeeded
                 }
-                _ => {}
             }
         }
         _ => panic!("Expected Proof"),
@@ -475,7 +482,10 @@ fn test_parse_division_with_precedence() {
     }"#;
 
     let result = parse_source(source);
-    assert!(result.is_ok(), "Division should parse with correct precedence");
+    assert!(
+        result.is_ok(),
+        "Division should parse with correct precedence"
+    );
 }
 
 #[test]
@@ -562,7 +572,10 @@ fn test_parse_logical_operator_precedence() {
     }"#;
 
     let result = parse_source(source);
-    assert!(result.is_ok(), "Should parse with correct logical precedence");
+    assert!(
+        result.is_ok(),
+        "Should parse with correct logical precedence"
+    );
 }
 
 // 4. BLOCK EXPRESSIONS AS PRIMARY
@@ -636,7 +649,8 @@ fn test_parse_refined_type_basic() {
                 assert_eq!(params.len(), 1);
                 match &params[0].typ {
                     Type::Refined(base, _predicate) => {
-                        assert_eq!(**base, Type::Field);
+                        // Check that base is a Field type (ignoring constraint/refinement details)
+                        assert!(matches!(**base, Type::Field { .. }));
                     }
                     _ => panic!("Expected Refined type, got {:?}", params[0].typ),
                 }
@@ -653,7 +667,10 @@ fn test_parse_refined_type_complex_predicate() {
     "#;
 
     let result = parse_source(source);
-    assert!(result.is_ok(), "Should parse refined type with complex predicate");
+    assert!(
+        result.is_ok(),
+        "Should parse refined type with complex predicate"
+    );
 }
 
 #[test]
@@ -666,7 +683,10 @@ fn test_parse_refined_type_in_signal() {
     }"#;
 
     let result = parse_source(source);
-    assert!(result.is_ok(), "Should parse refined type in signal declaration");
+    assert!(
+        result.is_ok(),
+        "Should parse refined type in signal declaration"
+    );
 }
 
 // 6. ARRAY INDEXING
@@ -709,7 +729,10 @@ fn test_parse_nested_array_indexing() {
     }"#;
 
     let result = parse_source(source);
-    assert!(result.is_ok(), "Should parse nested array indexing (matrix[i][j])");
+    assert!(
+        result.is_ok(),
+        "Should parse nested array indexing (matrix[i][j])"
+    );
 }
 
 #[test]
@@ -723,7 +746,10 @@ fn test_parse_array_indexing_in_expression() {
     }"#;
 
     let result = parse_source(source);
-    assert!(result.is_ok(), "Should parse array indexing in complex expressions");
+    assert!(
+        result.is_ok(),
+        "Should parse array indexing in complex expressions"
+    );
 }
 
 // 7. MIXED OPERATOR PRECEDENCE
@@ -745,7 +771,10 @@ fn test_parse_mixed_operator_precedence() {
     }"#;
 
     let result = parse_source(source);
-    assert!(result.is_ok(), "Should parse mixed operators with correct precedence");
+    assert!(
+        result.is_ok(),
+        "Should parse mixed operators with correct precedence"
+    );
 }
 
 #[test]
@@ -760,7 +789,10 @@ fn test_parse_arithmetic_comparison_logical() {
     }"#;
 
     let result = parse_source(source);
-    assert!(result.is_ok(), "Should parse arithmetic, comparison, and logical operators");
+    assert!(
+        result.is_ok(),
+        "Should parse arithmetic, comparison, and logical operators"
+    );
 }
 
 #[test]
@@ -777,7 +809,10 @@ fn test_parse_operator_precedence_with_parentheses() {
     }"#;
 
     let result = parse_source(source);
-    assert!(result.is_ok(), "Should parse operators with explicit parentheses");
+    assert!(
+        result.is_ok(),
+        "Should parse operators with explicit parentheses"
+    );
 }
 
 // ADDITIONAL EDGE CASE TESTS
@@ -807,7 +842,10 @@ fn test_parse_division_by_zero_syntax() {
     }"#;
 
     let result = parse_source(source);
-    assert!(result.is_ok(), "Parser should accept division by constant zero (runtime/typechecker issue)");
+    assert!(
+        result.is_ok(),
+        "Parser should accept division by constant zero (runtime/typechecker issue)"
+    );
 }
 
 #[test]
@@ -821,7 +859,10 @@ fn test_parse_not_in_complex_expression() {
     }"#;
 
     let result = parse_source(source);
-    assert!(result.is_ok(), "Should parse NOT with parenthesized expression");
+    assert!(
+        result.is_ok(),
+        "Should parse NOT with parenthesized expression"
+    );
 }
 
 #[test]
@@ -837,7 +878,10 @@ fn test_parse_chained_divisions() {
     }"#;
 
     let result = parse_source(source);
-    assert!(result.is_ok(), "Should parse chained divisions left-to-right");
+    assert!(
+        result.is_ok(),
+        "Should parse chained divisions left-to-right"
+    );
 }
 
 #[test]
@@ -856,7 +900,10 @@ fn test_parse_block_with_multiple_statements() {
     }"#;
 
     let result = parse_source(source);
-    assert!(result.is_ok(), "Should parse block with multiple let statements");
+    assert!(
+        result.is_ok(),
+        "Should parse block with multiple let statements"
+    );
 }
 
 #[test]
@@ -866,7 +913,10 @@ fn test_parse_refined_type_with_equality() {
     "#;
 
     let result = parse_source(source);
-    assert!(result.is_ok(), "Should parse refined type with equality predicate");
+    assert!(
+        result.is_ok(),
+        "Should parse refined type with equality predicate"
+    );
 }
 
 #[test]
@@ -881,6 +931,8 @@ fn test_parse_array_indexing_with_expression() {
     }"#;
 
     let result = parse_source(source);
-    assert!(result.is_ok(), "Should parse array indexing with complex index expression");
+    assert!(
+        result.is_ok(),
+        "Should parse array indexing with complex index expression"
+    );
 }
-
