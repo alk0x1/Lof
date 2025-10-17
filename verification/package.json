@@ -1,0 +1,15 @@
+{
+  "name": "verification",
+  "version": "1.0.0",
+  "description": "Validates mathematical equivalence between Lof's R1CS compiler and Circom.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "circomlib": "^2.0.5"
+  }
+}

@@ -183,9 +183,14 @@ class Verifier:
             temp_dir.mkdir(exist_ok=True)
 
             try:
-                # Copy files to temp directory
+                # Copy R1CS file to temp directory
                 shutil.copy(str(lof_r1cs), str(temp_dir / f"{circuit_name}.r1cs"))
-                shutil.copy(str(input_file), str(temp_dir / "inputs.json"))
+
+                # Flatten inputs for lofit (convert arrays to indexed keys)
+                flattened_inputs = self._flatten_inputs(test_vector["inputs"])
+                flattened_input_file = temp_dir / "inputs.json"
+                with open(flattened_input_file, 'w') as f:
+                    json.dump(flattened_inputs, f)
 
                 # Run lofit setup
                 result = subprocess.run(
@@ -329,6 +334,23 @@ class Verifier:
         except Exception:
             pass
         return mapping
+
+    def _flatten_inputs(self, inputs: Dict) -> Dict:
+        """
+        Flatten inputs for lofit compatibility.
+        Converts {"arr": ["1", "2", "3"]} → {"arr[0]": "1", "arr[1]": "2", "arr[2]": "3"}
+        Leaves flat inputs unchanged.
+        """
+        flattened = {}
+        for key, value in inputs.items():
+            if isinstance(value, list):
+                # Flatten array inputs
+                for i, item in enumerate(value):
+                    flattened[f"{key}[{i}]"] = str(item)
+            else:
+                # Keep scalar values as-is
+                flattened[key] = str(value)
+        return flattened
 
     def _extract_outputs_from_witness(self, witness, expected_outputs: Dict, signal_mapping: Dict) -> Dict:
         """Extract output values from witness using signal mapping"""

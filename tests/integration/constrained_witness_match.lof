@@ -1,0 +1,10 @@
+// Test: Should pass because witness 'w' is constrained via match
+
+proof ConstrainedWitnessMatch {
+    input x: field;
+    witness w: field;
+
+    match w with
+        | 0 => x
+        | _ => x + 1
+}

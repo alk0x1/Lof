@@ -1,0 +1,8 @@
+// Test: Should pass because witness 'w' is constrained via multiplication
+
+proof ConstrainedWitnessMul {
+    input x: field;
+    witness w: field;
+
+    let y = w * 2 in y
+}

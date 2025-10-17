@@ -1,28 +1,24 @@
-target
-*.lock
-zk_verification
-*.lock
-tree.txt
-settings.json
-lean.lean
+# Rust build artifacts
+/target/
+**/*.rs.bk
+*.pdb
 
-# Verification framework outputs
-verification/outputs/
+# Cargo lock files (keep for applications, ignore for libraries)
+# We keep it since this is a compiler toolchain
+# Cargo.lock
 
-# Documentation
-docs/
+# Debug symbols
+*.dSYM/
 
-# Examples build artifacts (keep .lof files, ignore generated files)
-examples/*/*.r1cs
-examples/*/*.bin
-examples/*/*.json
-examples/*/build/
-examples/*/keys/
-examples/*/proofs/
-examples/*/inputs/
-examples/*/output
+# IDEs and editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
 
-# ZK proof generated files
+# Lof compiler outputs
 *.r1cs
 *.bin
 *.wtns
@@ -30,13 +26,50 @@ examples/*/output
 *_public.json
 full_witness.json
 
-# WASM outputs  
+# ZK proving system outputs
+keys/
+proofs/
+inputs/*.json
+!inputs/.gitkeep
+
+# WASM build artifacts
 *.wasm
-*.js
+pkg/
+wasm-pack.log
 
-# User test outputs
+# Verification framework
+verification/outputs/
+verification/node_modules/
+verification/package-lock.json
 
-# Code coverage reports
+# Code coverage
 coverage/
+*.profraw
+*.profdata
 cobertura.xml
 tarpaulin-report.html
+lcov.info
+
+# Temporary files
+*.tmp
+*.temp
+.*.swp
+tree.txt
+settings.json
+
+# Development notes (use archive/ for these)
+# Keep in gitignore to avoid accidental commits of WIP notes
+*.local.md
+.scratch/
+
+# Logs
+*.log
+
+# OS specific
+Thumbs.db
+.AppleDouble
+.LSOverride
+
+docs
+.cleanup-helpers
+archive
