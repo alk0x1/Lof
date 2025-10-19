@@ -1,7 +1,6 @@
 [workspace]
 members = [
     "lof",
-    "cli",
     "lofit",
     "lof-witness-gen"
 ]

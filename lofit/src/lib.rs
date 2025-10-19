@@ -13,4 +13,3 @@ pub use witness::{generate_full_witness, generate_full_witness_with_provided};
 
 #[cfg(target_arch = "wasm32")]
 pub mod wasm;
-

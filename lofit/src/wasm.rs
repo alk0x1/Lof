@@ -1,27 +1,29 @@
-use wasm_bindgen::prelude::*;
-use serde::{Deserialize, Serialize};
 use ark_bn254::{Bn254, Fr};
+use ark_ff::PrimeField;
 use ark_groth16::{Groth16, ProvingKey, VerifyingKey};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_snark::SNARK;
 use ark_std::rand::thread_rng;
-use ark_ff::PrimeField;
 use num_bigint::BigInt;
+use serde::{Deserialize, Serialize};
 use std::io::Cursor;
+use wasm_bindgen::prelude::*;
 
 use crate::circuit::LofCircuit;
 use crate::r1cs::ConstraintSystem;
 
 /// Convert string to field element
 fn fr_from_str(s: &str) -> Result<Fr, String> {
-    let bigint = s.parse::<BigInt>()
+    let bigint = s
+        .parse::<BigInt>()
         .map_err(|e| format!("Failed to parse as BigInt: {}", e))?;
 
     let bytes = bigint.to_string().into_bytes();
     Fr::from_le_bytes_mod_order(&bytes);
 
     // Better approach: use from_str if available
-    let num = s.parse::<u64>()
+    let num = s
+        .parse::<u64>()
         .map_err(|e| format!("Failed to parse as u64: {}", e))?;
     Ok(Fr::from(num))
 }
@@ -62,10 +64,7 @@ impl WasmProver {
         let witness: Vec<String> = serde_wasm_bindgen::from_value(witness_json)
             .map_err(|e| JsValue::from_str(&format!("Failed to parse witness: {}", e)))?;
 
-        let witness_values: Result<Vec<Fr>, _> = witness
-            .iter()
-            .map(|s| fr_from_str(s))
-            .collect();
+        let witness_values: Result<Vec<Fr>, _> = witness.iter().map(|s| fr_from_str(s)).collect();
 
         let witness_values = witness_values
             .map_err(|e| JsValue::from_str(&format!("Failed to parse field element: {}", e)))?;
@@ -86,7 +85,8 @@ impl WasmProver {
             .map_err(|e| JsValue::from_str(&format!("Failed to generate proof: {}", e)))?;
 
         let mut proof_bytes = Vec::new();
-        proof.serialize_compressed(&mut proof_bytes)
+        proof
+            .serialize_compressed(&mut proof_bytes)
             .map_err(|e| JsValue::from_str(&format!("Failed to serialize proof: {}", e)))?;
 
         Ok(proof_bytes)
@@ -105,7 +105,9 @@ impl WasmVerifier {
         init_panic_hook();
 
         let verifying_key = VerifyingKey::<Bn254>::deserialize_compressed(verifying_key_bytes)
-            .map_err(|e| JsValue::from_str(&format!("Failed to deserialize verifying key: {}", e)))?;
+            .map_err(|e| {
+                JsValue::from_str(&format!("Failed to deserialize verifying key: {}", e))
+            })?;
 
         Ok(WasmVerifier { verifying_key })
     }
@@ -115,10 +117,8 @@ impl WasmVerifier {
         let public_inputs: Vec<String> = serde_wasm_bindgen::from_value(public_inputs_json)
             .map_err(|e| JsValue::from_str(&format!("Failed to parse public inputs: {}", e)))?;
 
-        let public_values: Result<Vec<Fr>, _> = public_inputs
-            .iter()
-            .map(|s| fr_from_str(s))
-            .collect();
+        let public_values: Result<Vec<Fr>, _> =
+            public_inputs.iter().map(|s| fr_from_str(s)).collect();
 
         let public_values = public_values
             .map_err(|e| JsValue::from_str(&format!("Failed to parse field element: {}", e)))?;

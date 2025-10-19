@@ -37,7 +37,7 @@ build-release: ## Build the project in release mode
 
 install: build-release ## Install the Lof CLI locally
 	@echo -e "$(BLUE)Installing Lof CLI...$(NC)"
-	cargo install --path cli
+	cargo install --force --path lof
 	@echo -e "$(GREEN)Lof installed successfully!$(NC)"
 	@lof --version
 

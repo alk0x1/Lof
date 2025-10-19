@@ -117,10 +117,7 @@ fn parse_inputs_in_order(
 /// Parse inputs that are present in JSON, return partial witness
 /// Used when prover provides only some witness values (private inputs)
 /// and the rest will be computed from constraints
-fn parse_partial_witness(
-    json_map: &InputsJson,
-    variable_names: &[String],
-) -> Vec<Fr> {
+fn parse_partial_witness(json_map: &InputsJson, variable_names: &[String]) -> Vec<Fr> {
     let mut values = Vec::new();
     for name in variable_names {
         if let Some(value_str) = json_map.get(name) {
@@ -267,7 +264,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let provided_witnesses = parse_partial_witness(&wit_inputs_json, &r1cs.witnesses);
 
                 // Use provided witnesses + constraint solving for remaining values
-                info!("Generating full witness with {} provided witness values...", provided_witnesses.len());
+                info!(
+                    "Generating full witness with {} provided witness values...",
+                    provided_witnesses.len()
+                );
                 generate_full_witness_with_provided(&r1cs, &pub_values, &provided_witnesses)?
             } else {
                 info!("No witness file found, generating witness from constraints only...");

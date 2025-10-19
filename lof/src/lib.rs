@@ -1,4 +1,5 @@
 pub mod ast;
+pub mod cli;
 pub mod ir;
 pub mod ir_generator;
 pub mod lexer;

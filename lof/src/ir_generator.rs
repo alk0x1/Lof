@@ -2,7 +2,6 @@
 ///
 /// This module walks the AST and emits executable instructions
 /// that can be run to compute witness values.
-
 use crate::ast::{Expression, Operator, Parameter, Pattern, Type, Visibility};
 use crate::ir::{bigint_to_ir_constant, IRCircuit, IRExpr, IRInstruction, IRType};
 use num_bigint::BigInt;
@@ -64,11 +63,7 @@ impl IRGenerator {
                     match signal.visibility {
                         Visibility::Input => {
                             // Flatten arrays and tuples for inputs
-                            self.flatten_signal_to_inputs(
-                                &signal.name,
-                                &ir_type,
-                                &mut pub_inputs,
-                            );
+                            self.flatten_signal_to_inputs(&signal.name, &ir_type, &mut pub_inputs);
                         }
                         Visibility::Witness => {
                             witnesses.push((signal.name.clone(), ir_type));
@@ -148,7 +143,10 @@ impl IRGenerator {
     }
 
     /// Convert an expression to IR instructions
-    fn convert_expression_to_ir(&mut self, expr: &Expression) -> Result<Option<IRExpr>, IRGenError> {
+    fn convert_expression_to_ir(
+        &mut self,
+        expr: &Expression,
+    ) -> Result<Option<IRExpr>, IRGenError> {
         match expr {
             Expression::Number(n) => {
                 let bigint = BigInt::from(*n);
@@ -165,12 +163,12 @@ impl IRGenerator {
             }
 
             Expression::BinaryOp { left, op, right } => {
-                let left_expr = self
-                    .convert_expression_to_ir(left)?
-                    .ok_or_else(|| IRGenError::UnsupportedExpression("Empty left expr".to_string()))?;
-                let right_expr = self
-                    .convert_expression_to_ir(right)?
-                    .ok_or_else(|| IRGenError::UnsupportedExpression("Empty right expr".to_string()))?;
+                let left_expr = self.convert_expression_to_ir(left)?.ok_or_else(|| {
+                    IRGenError::UnsupportedExpression("Empty left expr".to_string())
+                })?;
+                let right_expr = self.convert_expression_to_ir(right)?.ok_or_else(|| {
+                    IRGenError::UnsupportedExpression("Empty right expr".to_string())
+                })?;
 
                 let result_expr = match op {
                     Operator::Add => IRExpr::Add(Box::new(left_expr), Box::new(right_expr)),
@@ -183,7 +181,9 @@ impl IRGenerator {
                     Operator::Le => IRExpr::Le(Box::new(left_expr), Box::new(right_expr)),
                     Operator::Ge => IRExpr::Ge(Box::new(left_expr), Box::new(right_expr)),
                     Operator::Equal => IRExpr::Equal(Box::new(left_expr), Box::new(right_expr)),
-                    Operator::NotEqual => IRExpr::NotEqual(Box::new(left_expr), Box::new(right_expr)),
+                    Operator::NotEqual => {
+                        IRExpr::NotEqual(Box::new(left_expr), Box::new(right_expr))
+                    }
 
                     Operator::And => IRExpr::And(Box::new(left_expr), Box::new(right_expr)),
                     Operator::Or => IRExpr::Or(Box::new(left_expr), Box::new(right_expr)),
@@ -207,9 +207,9 @@ impl IRGenerator {
                 value,
                 body,
             } => {
-                let value_expr = self
-                    .convert_expression_to_ir(value)?
-                    .ok_or_else(|| IRGenError::UnsupportedExpression("Empty value in let".to_string()))?;
+                let value_expr = self.convert_expression_to_ir(value)?.ok_or_else(|| {
+                    IRGenError::UnsupportedExpression("Empty value in let".to_string())
+                })?;
 
                 // Bind pattern
                 self.bind_pattern(pattern, value_expr)?;
@@ -219,9 +219,9 @@ impl IRGenerator {
             }
 
             Expression::Assert(condition) => {
-                let cond_expr = self
-                    .convert_expression_to_ir(condition)?
-                    .ok_or_else(|| IRGenError::UnsupportedExpression("Empty assert condition".to_string()))?;
+                let cond_expr = self.convert_expression_to_ir(condition)?.ok_or_else(|| {
+                    IRGenError::UnsupportedExpression("Empty assert condition".to_string())
+                })?;
 
                 self.instructions.push(IRInstruction::Assert {
                     condition: cond_expr,
@@ -290,9 +290,9 @@ impl IRGenerator {
 
                     // Bind parameters
                     for (param, arg) in params.iter().zip(arguments.iter()) {
-                        let arg_expr = self
-                            .convert_expression_to_ir(arg)?
-                            .ok_or_else(|| IRGenError::UnsupportedExpression("Empty function arg".to_string()))?;
+                        let arg_expr = self.convert_expression_to_ir(arg)?.ok_or_else(|| {
+                            IRGenError::UnsupportedExpression("Empty function arg".to_string())
+                        })?;
                         self.variable_substitutions
                             .insert(param.name.clone(), arg_expr);
                     }
@@ -312,7 +312,10 @@ impl IRGenerator {
                 }
             }
 
-            Expression::Match { value: _, patterns: _ } => {
+            Expression::Match {
+                value: _,
+                patterns: _,
+            } => {
                 // Match expressions require more complex IR
                 // For now, just warn and skip
                 warn!("Match expressions not yet supported in IR generation");

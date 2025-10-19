@@ -6,7 +6,6 @@
 /// 3. Build lofit WASM for proving
 /// 4. Create directory structure
 /// 5. Generate integration example code
-
 use std::fs::{self, File};
 use std::io::BufWriter;
 use std::path::Path;
@@ -158,8 +157,8 @@ fn generate_witness_wasm(
     let lof_witness_gen = which::which("lof-witness-gen")
         .or_else(|_| -> Result<std::path::PathBuf, which::Error> {
             // Try to find in cargo target directory
-            let current_exe = std::env::current_exe()
-                .map_err(|_| which::Error::CannotFindBinaryPath)?;
+            let current_exe =
+                std::env::current_exe().map_err(|_| which::Error::CannotFindBinaryPath)?;
             let target_dir = current_exe
                 .ancestors()
                 .find(|p| p.ends_with("target"))
@@ -202,7 +201,10 @@ fn generate_witness_wasm(
     let wasm_project_dir = witness_output_dir.join(format!("{}_witness_wasm", circuit_name));
 
     if !wasm_project_dir.exists() {
-        error!("Witness WASM project not found at: {}", wasm_project_dir.display());
+        error!(
+            "Witness WASM project not found at: {}",
+            wasm_project_dir.display()
+        );
         return Err("Witness WASM project not created".into());
     }
 
@@ -324,7 +326,8 @@ fn generate_integration_code(
     circuit_name: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Generate integration.js
-    let integration_code = format!(r#"// Integration Example for {}
+    let integration_code = format!(
+        r#"// Integration Example for {}
 // This file shows how to use the generated WASM modules
 
 import initWitness, {{ compute_witness }} from './witness/{}_witness_wasm.js';
@@ -431,12 +434,15 @@ async function example() {{
 
 // Export for use in other modules
 export {{ initializeWasm, generateProof, verifyProof }};
-"#, circuit_name, circuit_name, circuit_name, circuit_name);
+"#,
+        circuit_name, circuit_name, circuit_name, circuit_name
+    );
 
     fs::write(package_dir.join("integration.js"), integration_code)?;
 
     // Generate README
-    let readme = format!(r#"# {} Web Package
+    let readme = format!(
+        r#"# {} Web Package
 
 This package contains everything needed to generate and verify zero-knowledge proofs for the `{}` circuit in a web browser.
 
@@ -597,7 +603,19 @@ cargo run --bin lofit -- verify \
 ## License
 
 Same as the Lof project.
-"#, circuit_name, circuit_name, circuit_name, circuit_name, circuit_name, circuit_name, circuit_name, circuit_name, circuit_name, circuit_name, circuit_name);
+"#,
+        circuit_name,
+        circuit_name,
+        circuit_name,
+        circuit_name,
+        circuit_name,
+        circuit_name,
+        circuit_name,
+        circuit_name,
+        circuit_name,
+        circuit_name,
+        circuit_name
+    );
 
     fs::write(package_dir.join("README.md"), readme)?;
 

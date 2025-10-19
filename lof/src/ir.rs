@@ -4,7 +4,6 @@
 /// witness generation by executing the circuit with concrete inputs.
 ///
 /// Unlike R1CS which is declarative constraints, IR is imperative instructions.
-
 use num_bigint::BigInt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -55,10 +54,16 @@ pub enum IRExpr {
     Not(Box<IRExpr>),
 
     /// Array indexing (constant indices only)
-    ArrayIndex { array: String, index: usize },
+    ArrayIndex {
+        array: String,
+        index: usize,
+    },
 
     /// Tuple field access
-    TupleField { tuple: String, index: usize },
+    TupleField {
+        tuple: String,
+        index: usize,
+    },
 }
 
 /// Type information for IR variables
@@ -66,7 +71,10 @@ pub enum IRExpr {
 pub enum IRType {
     Field,
     Bool,
-    Array { element_type: Box<IRType>, size: usize },
+    Array {
+        element_type: Box<IRType>,
+        size: usize,
+    },
     Tuple(Vec<IRType>),
 }
 
