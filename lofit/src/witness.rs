@@ -35,16 +35,44 @@ pub fn generate_full_witness(
     r1cs: &ConstraintSystem,
     pub_inputs: &[Fr],
 ) -> Result<Vec<Fr>, Box<dyn std::error::Error>> {
+    generate_full_witness_with_provided(r1cs, pub_inputs, &[])
+}
+
+/// Generate witness with pre-computed witness values
+/// This is used when the prover provides some witness values (like private inputs)
+/// and lofit needs to compute the remaining witness values from constraints.
+///
+/// NOTE: The provided witness values are PRIVATE and stay on the prover's machine.
+/// They are never shared - only the zero-knowledge proof is shared!
+pub fn generate_full_witness_with_provided(
+    r1cs: &ConstraintSystem,
+    pub_inputs: &[Fr],
+    provided_witnesses: &[Fr],
+) -> Result<Vec<Fr>, Box<dyn std::error::Error>> {
     let mut values = HashMap::new();
 
     // add ONE
     values.insert(0u32, Fr::from(1u64));
 
+    // Add public inputs
     for (i, val) in pub_inputs.iter().enumerate() {
         values.insert((i + 1) as u32, *val);
     }
 
-    // calculate all witness values by evaluating constraints
+    // Add provided witness values (these are given by the prover, not computed)
+    // These are PRIVATE inputs that stay on the prover's machine - never shared!
+    let witness_start_index = (pub_inputs.len() + 1) as u32;
+    for (i, val) in provided_witnesses.iter().enumerate() {
+        values.insert(witness_start_index + i as u32, *val);
+    }
+
+    eprintln!(
+        "Starting witness computation with {} public inputs and {} provided witnesses",
+        pub_inputs.len(),
+        provided_witnesses.len()
+    );
+
+    // calculate remaining witness values by evaluating constraints
     let mut changed = true;
     let mut iterations = 0;
     const MAX_ITERATIONS: usize = 1000; // Prevent infinite loops (increased for complex circuits)

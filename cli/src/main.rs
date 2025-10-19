@@ -138,6 +138,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         error!("R1CS generation failed");
                         Err("R1CS error".into())
                     }
+                    CompilerError::IRError(e) => {
+                        error!("IR generation failed: {}", e);
+                        Err(format!("IR error: {}", e).into())
+                    }
                 },
             }
         }
@@ -297,6 +301,10 @@ fn compile_r1cs(
             CompilerError::R1CSError => {
                 error!("R1CS generation failed");
                 Err("R1CS error".into())
+            }
+            CompilerError::IRError(e) => {
+                error!("IR generation failed: {}", e);
+                Err(format!("IR error: {}", e).into())
             }
         },
     }

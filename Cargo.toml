@@ -1,6 +1,8 @@
 [workspace]
 members = [
     "lof",
-    "cli", 
-    "lofit", "lof-codegen"]
+    "cli",
+    "lofit",
+    "lof-witness-gen"
+]
 resolver = "2"

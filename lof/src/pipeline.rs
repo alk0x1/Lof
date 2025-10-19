@@ -1,4 +1,5 @@
 use crate::ast::Expression;
+use crate::ir_generator::IRGenerator;
 use crate::lexer::Lexer;
 use crate::parser::Parser;
 use crate::r1cs::R1CSGenerator;
@@ -11,6 +12,7 @@ pub enum CompilerError {
     ParserError(String),
     TypeCheckerError(TypeError),
     R1CSError,
+    IRError(String),
     NoProofs,
 }
 
@@ -97,9 +99,10 @@ impl CompilerPipeline {
 
         info!("Type checking completed successfully");
 
-        // Step 3: R1CS Generation
-        info!("Generating R1CS constraints...");
+        // Step 3: R1CS and IR Generation
+        info!("Generating R1CS constraints and IR...");
         let mut r1cs_generator = R1CSGenerator::new();
+        let mut ir_generator = IRGenerator::new();
 
         let file_stem = source_path
             .file_stem()
@@ -114,14 +117,16 @@ impl CompilerPipeline {
             {
                 debug!("Registering function '{}'", name);
                 r1cs_generator.register_function(name.clone(), params.clone(), *body.clone());
+                ir_generator.register_function(name.clone(), params.clone(), *body.clone());
             }
         }
 
         // Second pass: Convert proofs
         for proof in &ast {
             if let Expression::Proof { name, .. } = proof {
-                debug!("Converting proof '{}' to R1CS", name);
+                debug!("Converting proof '{}' to R1CS and IR", name);
 
+                // Generate R1CS
                 match r1cs_generator.convert_proof(proof) {
                     Ok(_) => {
                         // Check for empty constraints
@@ -168,6 +173,41 @@ impl CompilerPipeline {
                     Err(e) => {
                         error!("R1CS generation failed for proof '{}': {}", name, e);
                         return Err(CompilerError::R1CSError);
+                    }
+                }
+
+                // Generate IR
+                match ir_generator.convert_proof(proof) {
+                    Ok(ir_circuit) => {
+                        let ir_path = source_path.with_file_name(format!("{}.ir", file_stem));
+                        info!("Writing IR file to: {}", ir_path.display());
+
+                        match ir_circuit.write_to_file(&ir_path) {
+                            Ok(_) => {
+                                info!(
+                                    "Successfully wrote IR to {} ({} instructions)",
+                                    ir_path.display(),
+                                    ir_circuit.instructions.len()
+                                );
+
+                                // Log IR metadata
+                                info!(
+                                    "IR metadata: pub_inputs={}, witnesses={}, outputs={}, instructions={}",
+                                    ir_circuit.pub_inputs.len(),
+                                    ir_circuit.witnesses.len(),
+                                    ir_circuit.outputs.len(),
+                                    ir_circuit.instructions.len()
+                                );
+                            }
+                            Err(e) => {
+                                error!("Failed to write IR file: {}", e);
+                                return Err(CompilerError::IRError(format!("{}", e)));
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!("IR generation failed for proof '{}': {:?}", name, e);
+                        return Err(CompilerError::IRError(format!("{:?}", e)));
                     }
                 }
             }

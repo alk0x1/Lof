@@ -1,4 +1,6 @@
 pub mod ast;
+pub mod ir;
+pub mod ir_generator;
 pub mod lexer;
 pub mod parser;
 pub mod pipeline;
@@ -6,6 +8,8 @@ pub mod r1cs;
 pub mod typechecker;
 
 pub use ast::Expression;
+pub use ir::{IRCircuit, IRExpr, IRInstruction, IRType};
+pub use ir_generator::{IRGenError, IRGenerator};
 pub use pipeline::{CompilerError, CompilerPipeline};
 pub use r1cs::{R1CSError, R1CSGenerator};
 

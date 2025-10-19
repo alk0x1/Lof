@@ -1,0 +1,396 @@
+/// IR Generator - Converts typed AST to executable IR
+///
+/// This module walks the AST and emits executable instructions
+/// that can be run to compute witness values.
+
+use crate::ast::{Expression, Operator, Parameter, Pattern, Type, Visibility};
+use crate::ir::{bigint_to_ir_constant, IRCircuit, IRExpr, IRInstruction, IRType};
+use num_bigint::BigInt;
+use std::collections::HashMap;
+use tracing::{debug, warn};
+
+#[derive(Debug)]
+pub enum IRGenError {
+    UnsupportedExpression(String),
+    UnknownVariable(String),
+    InvalidPattern(String),
+    TypeError(String),
+}
+
+pub struct IRGenerator {
+    /// Current instruction list
+    instructions: Vec<IRInstruction>,
+
+    /// Function definitions from the program
+    function_defs: HashMap<String, (Vec<Parameter>, Expression)>,
+
+    /// Variable substitutions for let bindings
+    variable_substitutions: HashMap<String, IRExpr>,
+}
+
+impl IRGenerator {
+    pub fn new() -> Self {
+        Self {
+            instructions: Vec::new(),
+            function_defs: HashMap::new(),
+            variable_substitutions: HashMap::new(),
+        }
+    }
+
+    /// Register a function definition
+    pub fn register_function(&mut self, name: String, params: Vec<Parameter>, body: Expression) {
+        self.function_defs.insert(name, (params, body));
+    }
+
+    /// Convert a proof to IR
+    pub fn convert_proof(&mut self, expr: &Expression) -> Result<IRCircuit, IRGenError> {
+        match expr {
+            Expression::Proof {
+                name,
+                signals,
+                body,
+                ..
+            } => {
+                debug!("Converting proof '{}' to IR", name);
+
+                // Collect signals by visibility
+                let mut pub_inputs = Vec::new();
+                let mut witnesses = Vec::new();
+                let mut outputs = Vec::new();
+
+                for signal in signals {
+                    let ir_type = self.convert_type(&signal.typ)?;
+
+                    match signal.visibility {
+                        Visibility::Input => {
+                            // Flatten arrays and tuples for inputs
+                            self.flatten_signal_to_inputs(
+                                &signal.name,
+                                &ir_type,
+                                &mut pub_inputs,
+                            );
+                        }
+                        Visibility::Witness => {
+                            witnesses.push((signal.name.clone(), ir_type));
+                        }
+                        Visibility::Output => {
+                            outputs.push((signal.name.clone(), ir_type));
+                        }
+                    }
+                }
+
+                // Convert body to instructions
+                self.convert_expression_to_ir(body)?;
+
+                Ok(IRCircuit {
+                    name: name.clone(),
+                    pub_inputs,
+                    witnesses,
+                    outputs,
+                    instructions: self.instructions.clone(),
+                    functions: HashMap::new(), // TODO: Convert function defs to IR
+                })
+            }
+            _ => Err(IRGenError::UnsupportedExpression(
+                "Expected proof expression".to_string(),
+            )),
+        }
+    }
+
+    /// Flatten compound types into individual input variables
+    fn flatten_signal_to_inputs(
+        &self,
+        name: &str,
+        typ: &IRType,
+        inputs: &mut Vec<(String, IRType)>,
+    ) {
+        match typ {
+            IRType::Array { element_type, size } => {
+                // Expand array: arr[0], arr[1], ...
+                for i in 0..*size {
+                    let indexed_name = format!("{}[{}]", name, i);
+                    inputs.push((indexed_name, (**element_type).clone()));
+                }
+            }
+            IRType::Tuple(field_types) => {
+                // Expand tuple: tuple_0, tuple_1, ...
+                for (i, field_type) in field_types.iter().enumerate() {
+                    let component_name = format!("{}_{}", name, i);
+                    inputs.push((component_name, field_type.clone()));
+                }
+            }
+            _ => {
+                // Scalar type
+                inputs.push((name.to_string(), typ.clone()));
+            }
+        }
+    }
+
+    /// Convert AST type to IR type
+    fn convert_type(&self, typ: &Type) -> Result<IRType, IRGenError> {
+        match typ {
+            Type::Field { .. } => Ok(IRType::Field),
+            Type::Bool { .. } => Ok(IRType::Bool),
+            Type::Array { element_type, size } => Ok(IRType::Array {
+                element_type: Box::new(self.convert_type(element_type)?),
+                size: *size,
+            }),
+            Type::Tuple(types) => {
+                let ir_types: Result<Vec<_>, _> =
+                    types.iter().map(|t| self.convert_type(t)).collect();
+                Ok(IRType::Tuple(ir_types?))
+            }
+            _ => Err(IRGenError::TypeError(format!(
+                "Unsupported type in IR: {:?}",
+                typ
+            ))),
+        }
+    }
+
+    /// Convert an expression to IR instructions
+    fn convert_expression_to_ir(&mut self, expr: &Expression) -> Result<Option<IRExpr>, IRGenError> {
+        match expr {
+            Expression::Number(n) => {
+                let bigint = BigInt::from(*n);
+                Ok(Some(IRExpr::Constant(bigint_to_ir_constant(&bigint))))
+            }
+
+            Expression::Variable(name) => {
+                // Check for substitutions first
+                if let Some(subst) = self.variable_substitutions.get(name) {
+                    Ok(Some(subst.clone()))
+                } else {
+                    Ok(Some(IRExpr::Variable(name.clone())))
+                }
+            }
+
+            Expression::BinaryOp { left, op, right } => {
+                let left_expr = self
+                    .convert_expression_to_ir(left)?
+                    .ok_or_else(|| IRGenError::UnsupportedExpression("Empty left expr".to_string()))?;
+                let right_expr = self
+                    .convert_expression_to_ir(right)?
+                    .ok_or_else(|| IRGenError::UnsupportedExpression("Empty right expr".to_string()))?;
+
+                let result_expr = match op {
+                    Operator::Add => IRExpr::Add(Box::new(left_expr), Box::new(right_expr)),
+                    Operator::Sub => IRExpr::Sub(Box::new(left_expr), Box::new(right_expr)),
+                    Operator::Mul => IRExpr::Mul(Box::new(left_expr), Box::new(right_expr)),
+                    Operator::Div => IRExpr::Div(Box::new(left_expr), Box::new(right_expr)),
+
+                    Operator::Lt => IRExpr::Lt(Box::new(left_expr), Box::new(right_expr)),
+                    Operator::Gt => IRExpr::Gt(Box::new(left_expr), Box::new(right_expr)),
+                    Operator::Le => IRExpr::Le(Box::new(left_expr), Box::new(right_expr)),
+                    Operator::Ge => IRExpr::Ge(Box::new(left_expr), Box::new(right_expr)),
+                    Operator::Equal => IRExpr::Equal(Box::new(left_expr), Box::new(right_expr)),
+                    Operator::NotEqual => IRExpr::NotEqual(Box::new(left_expr), Box::new(right_expr)),
+
+                    Operator::And => IRExpr::And(Box::new(left_expr), Box::new(right_expr)),
+                    Operator::Or => IRExpr::Or(Box::new(left_expr), Box::new(right_expr)),
+                    Operator::Not => IRExpr::Not(Box::new(right_expr)), // Unary op
+
+                    Operator::Assert => {
+                        // Constraint equality: left === right
+                        self.instructions.push(IRInstruction::Constrain {
+                            left: left_expr,
+                            right: right_expr,
+                        });
+                        return Ok(None); // Constraint has no return value
+                    }
+                };
+
+                Ok(Some(result_expr))
+            }
+
+            Expression::Let {
+                pattern,
+                value,
+                body,
+            } => {
+                let value_expr = self
+                    .convert_expression_to_ir(value)?
+                    .ok_or_else(|| IRGenError::UnsupportedExpression("Empty value in let".to_string()))?;
+
+                // Bind pattern
+                self.bind_pattern(pattern, value_expr)?;
+
+                // Process body
+                self.convert_expression_to_ir(body)
+            }
+
+            Expression::Assert(condition) => {
+                let cond_expr = self
+                    .convert_expression_to_ir(condition)?
+                    .ok_or_else(|| IRGenError::UnsupportedExpression("Empty assert condition".to_string()))?;
+
+                self.instructions.push(IRInstruction::Assert {
+                    condition: cond_expr,
+                });
+
+                Ok(None)
+            }
+
+            Expression::Block {
+                statements,
+                final_expr,
+            } => {
+                // Process statements
+                for stmt in statements {
+                    self.convert_expression_to_ir(stmt)?;
+                }
+
+                // Process final expression
+                if let Some(expr) = final_expr {
+                    self.convert_expression_to_ir(expr)
+                } else {
+                    Ok(None)
+                }
+            }
+
+            Expression::Tuple(elements) => {
+                // Process each element (may have side effects)
+                for elem in elements {
+                    self.convert_expression_to_ir(elem)?;
+                }
+                Ok(None)
+            }
+
+            Expression::ArrayIndex { array, index } => {
+                let array_name = match array.as_ref() {
+                    Expression::Variable(name) => name.clone(),
+                    _ => {
+                        return Err(IRGenError::UnsupportedExpression(
+                            "Array indexing only supported for variables".to_string(),
+                        ))
+                    }
+                };
+
+                let index_value = match index.as_ref() {
+                    Expression::Number(n) => *n as usize,
+                    _ => {
+                        return Err(IRGenError::UnsupportedExpression(
+                            "Only constant array indices supported".to_string(),
+                        ))
+                    }
+                };
+
+                Ok(Some(IRExpr::ArrayIndex {
+                    array: array_name,
+                    index: index_value,
+                }))
+            }
+
+            Expression::FunctionCall {
+                function,
+                arguments,
+            } => {
+                // Inline function call
+                if let Some((params, body)) = self.function_defs.get(function).cloned() {
+                    let saved_substitutions = self.variable_substitutions.clone();
+
+                    // Bind parameters
+                    for (param, arg) in params.iter().zip(arguments.iter()) {
+                        let arg_expr = self
+                            .convert_expression_to_ir(arg)?
+                            .ok_or_else(|| IRGenError::UnsupportedExpression("Empty function arg".to_string()))?;
+                        self.variable_substitutions
+                            .insert(param.name.clone(), arg_expr);
+                    }
+
+                    // Execute body
+                    let result = self.convert_expression_to_ir(&body)?;
+
+                    // Restore substitutions
+                    self.variable_substitutions = saved_substitutions;
+
+                    Ok(result)
+                } else {
+                    Err(IRGenError::UnknownVariable(format!(
+                        "Function '{}' not found",
+                        function
+                    )))
+                }
+            }
+
+            Expression::Match { value: _, patterns: _ } => {
+                // Match expressions require more complex IR
+                // For now, just warn and skip
+                warn!("Match expressions not yet supported in IR generation");
+                Ok(None)
+            }
+
+            Expression::ArrayLiteral(_elements) => {
+                // Array literals should be handled in let bindings
+                warn!("Array literal outside let binding - not yet supported");
+                Ok(None)
+            }
+
+            _ => {
+                warn!("Unsupported expression in IR generation: {:?}", expr);
+                Ok(None)
+            }
+        }
+    }
+
+    /// Bind a pattern to an expression
+    fn bind_pattern(&mut self, pattern: &Pattern, expr: IRExpr) -> Result<(), IRGenError> {
+        match pattern {
+            Pattern::Variable(name) => {
+                // Create an assignment instruction
+                self.instructions.push(IRInstruction::Assign {
+                    target: name.clone(),
+                    expr: expr.clone(),
+                });
+
+                // Also store substitution
+                self.variable_substitutions.insert(name.clone(), expr);
+
+                Ok(())
+            }
+
+            Pattern::Wildcard => {
+                // Wildcard doesn't bind
+                Ok(())
+            }
+
+            Pattern::Tuple(patterns) => {
+                // Decompose tuple
+                if let IRExpr::Variable(tuple_name) = expr {
+                    for (i, sub_pattern) in patterns.iter().enumerate() {
+                        let component_expr = IRExpr::TupleField {
+                            tuple: tuple_name.clone(),
+                            index: i,
+                        };
+                        self.bind_pattern(sub_pattern, component_expr)?;
+                    }
+                    Ok(())
+                } else {
+                    Err(IRGenError::InvalidPattern(
+                        "Tuple pattern requires variable".to_string(),
+                    ))
+                }
+            }
+
+            Pattern::Literal(lit) => {
+                // Create constraint that expr equals literal
+                let lit_expr = IRExpr::Constant(bigint_to_ir_constant(&BigInt::from(*lit)));
+                self.instructions.push(IRInstruction::Constrain {
+                    left: expr,
+                    right: lit_expr,
+                });
+                Ok(())
+            }
+
+            Pattern::Constructor(_, _) => {
+                warn!("Constructor patterns not yet supported in IR");
+                Ok(())
+            }
+        }
+    }
+}
+
+impl Default for IRGenerator {
+    fn default() -> Self {
+        Self::new()
+    }
+}

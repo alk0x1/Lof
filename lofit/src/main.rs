@@ -1,12 +1,14 @@
 use ark_bn254::Fr;
 use clap::{Parser, Subcommand};
-use lofit::generate_full_witness;
+use lofit::{generate_full_witness, generate_full_witness_with_provided};
 use lofit::{ConstraintSystem, LofCircuit, Proof, ProverKey, VerifierKey};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
 use std::path::PathBuf;
 use tracing::{debug, error, info, instrument, warn};
+
+mod package_web;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -53,6 +55,13 @@ enum Commands {
         public_inputs: Option<PathBuf>,
         #[arg(short, long, help = "R1CS input file (used to determine base name)")]
         input: Option<PathBuf>,
+    },
+    /// Package circuit for web deployment (generates WASM, keys, example code)
+    PackageWeb {
+        #[arg(short, long, help = "R1CS input file")]
+        input: PathBuf,
+        #[arg(short, long, help = "Output directory for web package")]
+        output: Option<PathBuf>,
     },
     /// Show version information
     Version,
@@ -105,6 +114,31 @@ fn parse_inputs_in_order(
     Ok(values)
 }
 
+/// Parse inputs that are present in JSON, return partial witness
+/// Used when prover provides only some witness values (private inputs)
+/// and the rest will be computed from constraints
+fn parse_partial_witness(
+    json_map: &InputsJson,
+    variable_names: &[String],
+) -> Vec<Fr> {
+    let mut values = Vec::new();
+    for name in variable_names {
+        if let Some(value_str) = json_map.get(name) {
+            if let Ok(val) = fr_from_str(value_str) {
+                values.push(val);
+            } else {
+                warn!("Failed to parse value for '{}', skipping", name);
+                break; // Stop at first unparseable value
+            }
+        } else {
+            // Variable not provided - will be computed later
+            break;
+        }
+    }
+    debug!("Parsed {} partial witness values from JSON", values.len());
+    values
+}
+
 #[instrument]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
@@ -112,6 +146,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     match cli.command {
         Commands::Version => {
             println!("{}", VERSION);
+            Ok(())
+        }
+        Commands::PackageWeb { input, output } => {
+            package_web::package_for_web(&input, output.as_deref())?;
             Ok(())
         }
         Commands::Setup {
@@ -213,23 +251,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let pub_values = parse_inputs_in_order(&pub_inputs_json, &r1cs.public_inputs)?;
 
-            info!("Generating full witness...");
-            let auto_witness = generate_full_witness(&r1cs, &pub_values)?;
-
+            // Check if witness file exists first
             let witness_path = witness.unwrap_or_else(|| {
                 std::path::Path::new("inputs").join(format!("{}_witness.json", base_name))
             });
 
             let wit_values = if witness_path.exists() {
-                info!("Reading witness from {}", witness_path.display());
+                info!("Reading provided witness from {}", witness_path.display());
                 let wit_inputs_json: InputsJson =
                     serde_json::from_reader(File::open(&witness_path)?)?;
                 debug!("Witness inputs: {:?}", wit_inputs_json);
 
-                parse_inputs_in_order(&wit_inputs_json, &r1cs.witnesses)?
+                // Parse partial witness - only the values provided by the prover
+                // The rest will be computed from constraints
+                let provided_witnesses = parse_partial_witness(&wit_inputs_json, &r1cs.witnesses);
+
+                // Use provided witnesses + constraint solving for remaining values
+                info!("Generating full witness with {} provided witness values...", provided_witnesses.len());
+                generate_full_witness_with_provided(&r1cs, &pub_values, &provided_witnesses)?
             } else {
-                info!("No witness file found, using auto-generated witness");
-                auto_witness
+                info!("No witness file found, generating witness from constraints only...");
+                generate_full_witness(&r1cs, &pub_values)?
             };
 
             if let Some(parent) = output_path.parent() {
