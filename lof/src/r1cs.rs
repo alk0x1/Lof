@@ -2,7 +2,7 @@ use crate::ast::{Expression, Operator, Parameter, Pattern, Type, Visibility};
 use num_bigint::BigInt;
 use std::fmt;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     io::{Read, Seek, Write},
     path::PathBuf,
 };
@@ -48,6 +48,7 @@ pub struct R1CSGenerator {
     pub context: R1CSContext,
     pub function_defs: HashMap<String, (Vec<Parameter>, Expression)>, // name -> (params, body)
     pub arrays: HashMap<String, Vec<String>>, // array_name -> [element_0, element_1, ...]
+    pub boolean_vars: HashSet<String>,
 }
 
 impl Default for R1CSGenerator {
@@ -70,6 +71,7 @@ impl R1CSGenerator {
             },
             function_defs: HashMap::new(),
             arrays: HashMap::new(),
+            boolean_vars: HashSet::new(),
         }
     }
 
@@ -159,6 +161,23 @@ impl R1CSGenerator {
         var
     }
 
+    fn enforce_boolean(&mut self, var: &str) {
+        if self.boolean_vars.insert(var.to_string()) {
+            self.constraints.push(R1CSConstraint {
+                a: LinearCombination {
+                    terms: vec![(var.to_string(), BigInt::from(1))],
+                },
+                b: LinearCombination {
+                    terms: vec![
+                        ("ONE".to_string(), BigInt::from(1)),
+                        (var.to_string(), BigInt::from(-1)),
+                    ],
+                },
+                c: LinearCombination { terms: vec![] },
+            });
+        }
+    }
+
     pub fn convert_proof(&mut self, expr: &Expression) -> Result<(), R1CSError> {
         match expr {
             Expression::Proof {
@@ -220,6 +239,9 @@ impl R1CSGenerator {
                                     self.context
                                         .variables
                                         .insert(signal.name.clone(), signal.typ.clone());
+                                    if matches!(signal.typ, Type::Bool { .. }) {
+                                        self.enforce_boolean(&signal.name);
+                                    }
                                 }
                             }
                         }
@@ -229,6 +251,9 @@ impl R1CSGenerator {
                             self.context
                                 .variables
                                 .insert(signal.name.clone(), signal.typ.clone());
+                            if matches!(signal.typ, Type::Bool { .. }) {
+                                self.enforce_boolean(&signal.name);
+                            }
                         }
                     }
                 }
@@ -282,11 +307,16 @@ impl R1CSGenerator {
                 // The condition itself (if it's an assertion operator) will create the constraint
                 let cond_lc = self.convert_to_linear_combination(condition)?;
 
-                // Don't create an additional constraint here - the assertion operator handles it
-                warn!(
-                    "PROCESSED ASSERT EXPRESSION, condition result: {:?}",
-                    cond_lc
-                );
+                // Enforce condition == 1
+                self.constraints.push(R1CSConstraint {
+                    a: cond_lc.clone(),
+                    b: LinearCombination {
+                        terms: vec![("ONE".to_string(), BigInt::from(1))],
+                    },
+                    c: LinearCombination {
+                        terms: vec![("ONE".to_string(), BigInt::from(1))],
+                    },
+                });
 
                 Ok(LinearCombination { terms: vec![] })
             }
@@ -573,6 +603,8 @@ impl R1CSGenerator {
                     c: LinearCombination { terms: vec![] },
                 });
 
+                self.enforce_boolean(&out);
+
                 Ok(LinearCombination {
                     terms: vec![(out, BigInt::from(1))],
                 })
@@ -655,6 +687,8 @@ impl R1CSGenerator {
                     c: neq_expr,
                 });
 
+                self.enforce_boolean(&neq_result);
+
                 Ok(LinearCombination {
                     terms: vec![(neq_result, BigInt::from(1))],
                 })
@@ -680,6 +714,8 @@ impl R1CSGenerator {
                         terms: vec![(temp.clone(), BigInt::from(1))],
                     },
                 });
+
+                self.enforce_boolean(&temp);
 
                 Ok(LinearCombination {
                     terms: vec![(temp, BigInt::from(1))],
@@ -724,6 +760,8 @@ impl R1CSGenerator {
                     c: result_lc,
                 });
 
+                self.enforce_boolean(&result_temp);
+
                 Ok(LinearCombination {
                     terms: vec![(result_temp, BigInt::from(1))],
                 })
@@ -751,6 +789,8 @@ impl R1CSGenerator {
                     },
                     c: result_lc,
                 });
+
+                self.enforce_boolean(&temp);
 
                 Ok(LinearCombination {
                     terms: vec![(temp, BigInt::from(1))],
@@ -1510,6 +1550,7 @@ impl R1CSGenerator {
             },
         });
         debug!("Comparison result variable: {}", result_var);
+        self.enforce_boolean(&result_var);
         Ok(LinearCombination {
             terms: vec![(result_var, BigInt::from(1))],
         })
@@ -1745,6 +1786,7 @@ pub fn read_r1cs_file(path: &PathBuf) -> std::io::Result<R1CSGenerator> {
         },
         function_defs: HashMap::new(),
         arrays: HashMap::new(),
+        boolean_vars: HashSet::new(),
     })
 }
 

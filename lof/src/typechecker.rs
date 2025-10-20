@@ -123,6 +123,10 @@ impl TypeChecker {
         matches!(typ, Type::Bool { .. })
     }
 
+    fn is_numeric_type(typ: &Type) -> bool {
+        matches!(typ, Type::Field { .. } | Type::Bool { .. })
+    }
+
     /// Promote a type to constrained status (direct only, no transitive)
     /// Used for assertions which don't create R1CS constraints by themselves
     fn promote_to_constrained_direct(&mut self, var_name: &str) {
@@ -222,6 +226,9 @@ impl TypeChecker {
                 refinement: Some(Refinement::NonZero),
                 ..
             } => Ok(()),
+            Type::Bool { .. } => Err(TypeError::NonZeroRequired {
+                found: typ.clone(),
+            }),
             _ => Err(TypeError::NonZeroRequired {
                 found: typ.clone(),
             }),
@@ -844,16 +851,16 @@ impl TypeChecker {
         match op {
             Operator::Add | Operator::Sub => {
                 // Addition and subtraction DO NOT promote to constrained (just linear combinations)
-                let left_is_field = Self::is_field_type(left);
-                let right_is_field = Self::is_field_type(right);
+                let left_numeric = Self::is_numeric_type(left);
+                let right_numeric = Self::is_numeric_type(right);
 
-                if left_is_field && right_is_field {
+                if left_numeric && right_numeric {
                     // Result inherits the "least constrained" status
                     Ok(Self::field_type(ConstraintStatus::Unconstrained, None))
                 } else {
                     Err(TypeError::TypeMismatch {
                         expected: Self::field_type(ConstraintStatus::Constrained, None),
-                        found: if !left_is_field {
+                        found: if !left_numeric {
                             left.clone()
                         } else {
                             right.clone()
@@ -864,20 +871,28 @@ impl TypeChecker {
 
             Operator::Mul | Operator::Div => {
                 // Multiplication and division CREATE R1CS constraints, so promote operands
-                let left_is_field = Self::is_field_type(left);
-                let right_is_field = Self::is_field_type(right);
+                let left_numeric = Self::is_numeric_type(left);
+                let right_numeric = Self::is_numeric_type(right);
+                let denominator_valid = if matches!(op, Operator::Div) {
+                    Self::is_field_type(right)
+                } else {
+                    true
+                };
 
-                if left_is_field && right_is_field {
+                if left_numeric && right_numeric && denominator_valid {
                     // NOTE: Actual variable promotion happens in BinaryOp expression handling
                     Ok(Self::field_type(ConstraintStatus::Constrained, None))
                 } else {
+                    let offending = if !left_numeric {
+                        left.clone()
+                    } else if !right_numeric {
+                        right.clone()
+                    } else {
+                        right.clone()
+                    };
                     Err(TypeError::TypeMismatch {
                         expected: Self::field_type(ConstraintStatus::Constrained, None),
-                        found: if !left_is_field {
-                            left.clone()
-                        } else {
-                            right.clone()
-                        },
+                        found: offending,
                     })
                 }
             }

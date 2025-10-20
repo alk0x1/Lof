@@ -684,6 +684,45 @@ fn test_conditional_constraint() {
 }
 
 #[test]
+fn test_bool_selector_arithmetic_passes() {
+    let source = r#"
+    proof Selector {
+        input a: field;
+        input b: field;
+        witness choose_a: bool;
+        output result: field;
+
+        let selected = choose_a * a + (1 - choose_a) * b in
+        assert result === selected;
+        assert choose_a == choose_a  // ensure the selector is referenced
+    }
+    "#;
+    assert!(type_check_passes(source));
+}
+
+#[test]
+fn test_assert_boolean_condition() {
+    let source = r#"
+    proof FlagCheck {
+        witness flag: bool;
+        assert flag;
+    }
+    "#;
+    assert!(type_check_passes(source));
+}
+
+#[test]
+fn test_unconstrained_bool_witness_errors() {
+    let source = r#"
+    proof Broken {
+        witness flag: bool;
+        assert 1 === 1;
+    }
+    "#;
+    assert!(type_check_fails_with_unconstrained_witness_error(source));
+}
+
+#[test]
 fn test_partial_constraint_chain() {
     // Some witnesses constrained, some not
     let source = r#"
