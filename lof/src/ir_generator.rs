@@ -219,15 +219,18 @@ impl IRGenerator {
             }
 
             Expression::Assert(condition) => {
-                let cond_expr = self.convert_expression_to_ir(condition)?.ok_or_else(|| {
-                    IRGenError::UnsupportedExpression("Empty assert condition".to_string())
-                })?;
-
-                self.instructions.push(IRInstruction::Assert {
-                    condition: cond_expr,
-                });
-
-                Ok(None)
+                match self.convert_expression_to_ir(condition)? {
+                    Some(cond_expr) => {
+                        self.instructions.push(IRInstruction::Assert {
+                            condition: cond_expr,
+                        });
+                        Ok(None)
+                    }
+                    None => {
+                        // Constraint expressions (e.g. ===) already emitted instructions
+                        Ok(None)
+                    }
+                }
             }
 
             Expression::Block {
@@ -312,14 +315,75 @@ impl IRGenerator {
                 }
             }
 
-            Expression::Match {
-                value: _,
-                patterns: _,
-            } => {
-                // Match expressions require more complex IR
-                // For now, just warn and skip
-                warn!("Match expressions not yet supported in IR generation");
-                Ok(None)
+            Expression::Match { value, patterns } => {
+                if patterns.is_empty() {
+                    return Err(IRGenError::UnsupportedExpression(
+                        "Match expression with no patterns".to_string(),
+                    ));
+                }
+
+                let match_value = self.convert_expression_to_ir(value)?.ok_or_else(|| {
+                    IRGenError::UnsupportedExpression(
+                        "Match value did not produce an expression".to_string(),
+                    )
+                })?;
+
+                // Remaining selector (starts at 1 and decreases as branches consume it)
+                let mut remaining_selector = Self::ir_constant(1);
+                let mut accumulated: Option<IRExpr> = None;
+
+                for (idx, pattern_arm) in patterns.iter().enumerate() {
+                    let (branch_guard, bindings) =
+                        self.match_pattern_condition(&pattern_arm.pattern, &match_value)?;
+
+                    // Branch is taken when remaining selector is 1 and the guard holds
+                    let selector = IRExpr::Mul(
+                        Box::new(remaining_selector.clone()),
+                        Box::new(branch_guard),
+                    );
+
+                    // Apply temporary substitutions for pattern bindings
+                    let saved_substitutions = self.variable_substitutions.clone();
+                    for (name, binding_expr) in bindings {
+                        self.variable_substitutions.insert(name, binding_expr);
+                    }
+
+                    let branch_value =
+                        self.convert_expression_to_ir(&pattern_arm.body)?.ok_or_else(|| {
+                            IRGenError::UnsupportedExpression(format!(
+                                "Match arm {} did not produce a value",
+                                idx
+                            ))
+                        })?;
+
+                    // Restore substitutions regardless of branch content
+                    self.variable_substitutions = saved_substitutions;
+
+                    // Weighted contribution: selector * branch_value
+                    let weighted_branch = IRExpr::Mul(
+                        Box::new(selector.clone()),
+                        Box::new(branch_value),
+                    );
+
+                    accumulated = Some(match accumulated {
+                        Some(current) => IRExpr::Add(Box::new(current), Box::new(weighted_branch)),
+                        None => weighted_branch,
+                    });
+
+                    // Update remaining selector unless this is the last arm
+                    if idx < patterns.len() - 1 {
+                        remaining_selector =
+                            IRExpr::Sub(Box::new(remaining_selector), Box::new(selector));
+                    }
+                }
+
+                if let Some(result_expr) = accumulated {
+                    Ok(Some(result_expr))
+                } else {
+                    Err(IRGenError::UnsupportedExpression(
+                        "Match expression produced no result".to_string(),
+                    ))
+                }
             }
 
             Expression::ArrayLiteral(_elements) => {
@@ -332,6 +396,39 @@ impl IRGenerator {
                 warn!("Unsupported expression in IR generation: {:?}", expr);
                 Ok(None)
             }
+        }
+    }
+
+    fn ir_constant(value: i64) -> IRExpr {
+        let bigint = BigInt::from(value);
+        IRExpr::Constant(bigint_to_ir_constant(&bigint))
+    }
+
+    fn match_pattern_condition(
+        &self,
+        pattern: &Pattern,
+        match_value: &IRExpr,
+    ) -> Result<(IRExpr, Vec<(String, IRExpr)>), IRGenError> {
+        match pattern {
+            Pattern::Literal(lit) => {
+                let literal = IRExpr::Constant(bigint_to_ir_constant(&BigInt::from(*lit)));
+                Ok((
+                    IRExpr::Equal(
+                        Box::new(match_value.clone()),
+                        Box::new(literal),
+                    ),
+                    Vec::new(),
+                ))
+            }
+            Pattern::Wildcard => Ok((Self::ir_constant(1), Vec::new())),
+            Pattern::Variable(name) => Ok((
+                Self::ir_constant(1),
+                vec![(name.clone(), match_value.clone())],
+            )),
+            Pattern::Tuple(_) | Pattern::Constructor(_, _) => Err(IRGenError::UnsupportedExpression(
+                "Tuple and constructor patterns are not yet supported in IR generation"
+                    .to_string(),
+            )),
         }
     }
 
