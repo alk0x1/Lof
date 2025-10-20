@@ -74,16 +74,14 @@ impl fmt::Display for TypeError {
                     name, witness_type, name, name, name, name
                 )
             }
-            TypeError::NonZeroRequired { found } => {
-                write!(
-                    f,
-                    "inv() requires NonZero<field>, found {}\n\
-                     \nDivision by zero creates undefined behavior in circuits.\n\
-                     \nHelp: Add assertion before using inv():\n\
-                     assert denominator != 0;",
-                    found
-                )
-            }
+            TypeError::NonZeroRequired { found } => write!(
+                f,
+                "Division requires NonZero<field>, found {}\n\
+                 \nDivision by zero creates undefined behavior in circuits.\n\
+                 \nHelp: Prove the denominator is non-zero:\n\
+                 assert denominator != 0;",
+                found
+            ),
         }
     }
 }
@@ -169,6 +167,12 @@ impl TypeChecker {
     /// Promote a type to NonZero refinement (also promotes to constrained)
     #[allow(dead_code, clippy::collapsible_match)]
     fn promote_to_nonzero(&mut self, var_name: &str) {
+        if let Some(deps) = self.dependencies.get(var_name).cloned() {
+            for dep in deps {
+                self.promote_to_nonzero(&dep);
+            }
+        }
+
         if let Some(typ) = self.symbols.get_mut(var_name) {
             if let Type::Field {
                 constraint,
@@ -179,6 +183,53 @@ impl TypeChecker {
                 *refinement = Some(Refinement::NonZero);
             }
         }
+    }
+
+    fn promote_expression_to_nonzero(&mut self, expr: &Expression) {
+        if let Expression::Variable(name) = expr {
+            self.promote_to_nonzero(name);
+        }
+    }
+
+    fn mark_nonzero_from_assert(&mut self, condition: &Expression) {
+        if let Expression::BinaryOp { left, op, right } = condition {
+            if *op == Operator::NotEqual {
+                if Self::is_zero_literal(left) {
+                    self.promote_expression_to_nonzero(right);
+                } else if Self::is_zero_literal(right) {
+                    self.promote_expression_to_nonzero(left);
+                }
+            }
+        }
+    }
+
+    fn ensure_nonzero_field(
+        &self,
+        expr: &Expression,
+        typ: &Type,
+    ) -> Result<(), TypeError> {
+        if let Expression::Number(value) = expr {
+            if *value == 0 {
+                return Err(TypeError::NonZeroRequired {
+                    found: typ.clone(),
+                });
+            }
+            return Ok(());
+        }
+
+        match typ {
+            Type::Field {
+                refinement: Some(Refinement::NonZero),
+                ..
+            } => Ok(()),
+            _ => Err(TypeError::NonZeroRequired {
+                found: typ.clone(),
+            }),
+        }
+    }
+
+    fn is_zero_literal(expr: &Expression) -> bool {
+        matches!(expr, Expression::Number(n) if *n == 0)
     }
 
     /// Extract variable names from an expression (for constraint promotion)
@@ -397,7 +448,14 @@ impl TypeChecker {
 
     pub fn check_expression(&mut self, expr: &Expression) -> Result<Type, TypeError> {
         match expr {
-            Expression::Number(_) => Ok(Self::field_type(ConstraintStatus::Constrained, None)),
+            Expression::Number(value) => {
+                let refinement = if *value == 0 {
+                    None
+                } else {
+                    Some(Refinement::NonZero)
+                };
+                Ok(Self::field_type(ConstraintStatus::Constrained, refinement))
+            }
             Expression::Variable(name) => self.read_variable(name),
             Expression::Let {
                 pattern,
@@ -454,6 +512,10 @@ impl TypeChecker {
                     }
                 }
 
+                if matches!(op, Operator::Div) {
+                    self.ensure_nonzero_field(right, &right_type)?;
+                }
+
                 self.check_operator(op, &left_type, &right_type)
             }
             Expression::Tuple(elements) => {
@@ -489,6 +551,8 @@ impl TypeChecker {
                         self.promote_to_constrained_direct(&var);
                     }
                 }
+
+                self.mark_nonzero_from_assert(condition);
 
                 Ok(Type::Unit)
             }

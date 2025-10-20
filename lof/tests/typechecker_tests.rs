@@ -32,6 +32,13 @@ fn type_check_fails_with_unconstrained_witness_error(source: &str) -> bool {
     )
 }
 
+fn type_check_fails_with_nonzero_error(source: &str) -> bool {
+    matches!(
+        parse_and_type_check(source),
+        Err(TypeError::NonZeroRequired { .. })
+    )
+}
+
 #[test]
 fn test_simple_variable_usage() {
     // Basic variable usage should pass
@@ -399,11 +406,37 @@ fn test_division_constrains_witness() {
     proof Valid {
         input divisor: field;
         witness x: field;
+        assert divisor != 0;
         let result = x / divisor in  // x is constrained
         assert result > 0
     }
     "#;
     assert!(type_check_passes(source));
+}
+
+#[test]
+fn test_division_requires_nonzero_assertion() {
+    let source = r#"
+    proof Invalid {
+        input divisor: field;
+        witness x: field;
+        let result = x / divisor in
+        assert result > 0
+    }
+    "#;
+    assert!(type_check_fails_with_nonzero_error(source));
+}
+
+#[test]
+fn test_division_by_zero_literal_fails() {
+    let source = r#"
+    proof Invalid {
+        witness x: field;
+        let result = x / 0 in
+        assert result > 0
+    }
+    "#;
+    assert!(type_check_fails_with_nonzero_error(source));
 }
 
 #[test]

@@ -35,11 +35,15 @@ build-release: ## Build the project in release mode
 	@echo -e "$(BLUE)Building Lof workspace (release)...$(NC)"
 	cargo build --release --all
 
-install: build-release ## Install the Lof CLI locally
+install: build-release ## Install the Lof tooling locally
 	@echo -e "$(BLUE)Installing Lof CLI...$(NC)"
 	cargo install --force --path lof
 	@echo -e "$(GREEN)Lof installed successfully!$(NC)"
 	@lof --version
+	@echo -e "$(BLUE)Installing Lofit toolkit...$(NC)"
+	cargo install --force --path lofit
+	@echo -e "$(GREEN)Lofit installed successfully!$(NC)"
+	@lofit --version
 
 clean: ## Clean build artifacts
 	@echo -e "$(BLUE)Cleaning build artifacts...$(NC)"
@@ -77,7 +81,7 @@ test-unit: ## Run Rust unit tests
 	@echo -e "$(BLUE)Running unit tests...$(NC)"
 	cargo test --all --verbose
 
-test-fast: check lint format-check test-unit ## Run all fast checks (Tier 1)
+test-fast: check lint format-check test-unit
 	@echo ""
 	@echo -e "$(GREEN)All fast checks passed!$(NC)"
 
@@ -97,7 +101,7 @@ test-compile: build ## Run R1CS compilation tests
 	@echo -e "$(BLUE)Running compilation tests...$(NC)"
 	cd tests/scripts && ./runcompiletests.sh
 
-test-integration: test-parser test-typecheck test-compile ## Run all integration tests (Tier 2)
+test-integration: test-parser test-typecheck test-compile
 	@echo ""
 	@echo -e "$(GREEN)All integration tests passed!$(NC)"
 
@@ -108,14 +112,6 @@ test-integration: test-parser test-typecheck test-compile ## Run all integration
 verify-quick: build-release install ## Quick verification smoke test
 	@echo -e "$(BLUE)Running quick verification (multiply circuit)...$(NC)"
 	python3 verification/verify.py multiply
-
-verify-add: build-release install ## Verify addition circuit
-	@echo -e "$(BLUE)Verifying addition circuit...$(NC)"
-	python3 verification/verify.py add
-
-verify-subtract: build-release install ## Verify subtraction circuit
-	@echo -e "$(BLUE)Verifying subtraction circuit...$(NC)"
-	python3 verification/verify.py subtract
 
 verify-all: build-release install ## Run full verification suite
 	@echo -e "$(BLUE)Running full verification suite...$(NC)"
