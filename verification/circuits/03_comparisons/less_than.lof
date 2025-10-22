@@ -3,5 +3,5 @@ proof LessThan {
     input b: field;
     witness result: field;
 
-    result === (a < b)
+    assert result === (a < b)
 }

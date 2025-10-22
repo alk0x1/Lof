@@ -2,7 +2,7 @@ use crate::r1cs::{Constraint, LinearCombination};
 use ark_ff::{Field, PrimeField};
 use ark_relations::r1cs::{
     ConstraintSynthesizer, ConstraintSystemRef, LinearCombination as ArkLinearCombination,
-    SynthesisError,
+    SynthesisError, Variable,
 };
 use ark_serialize::CanonicalDeserialize;
 use num_bigint::BigInt;
@@ -25,8 +25,6 @@ impl<F: PrimeField> ConstraintSynthesizer<F> for LofCircuit<F> {
         }
 
         // Allocate variables in the correct order for verification
-        let one = cs.new_input_variable(|| Ok(F::from(1u64)))?;
-
         let mut public_vars = Vec::new();
         for input in self.public_inputs.iter() {
             let var = cs.new_input_variable(|| Ok(*input))?;
@@ -34,7 +32,7 @@ impl<F: PrimeField> ConstraintSynthesizer<F> for LofCircuit<F> {
         }
 
         let mut var_map = std::collections::HashMap::new();
-        var_map.insert(0u32, one);
+        var_map.insert(0u32, Variable::One);
         for (i, var) in public_vars.iter().enumerate() {
             var_map.insert((i + 1) as u32, *var);
         }

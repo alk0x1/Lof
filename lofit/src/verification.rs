@@ -16,12 +16,8 @@ impl VerifierKey {
         debug!("Number of public inputs: {}", public_inputs.len());
         debug!("Public inputs: {:?}", public_inputs);
 
-        // Create full input vector with just ONE and public inputs
-        let mut full_inputs = vec![Fr::from(1u64)]; // Add ONE constant
-        full_inputs.extend(public_inputs.iter().cloned());
-
-        debug!("Calling SNARK::verify with {} inputs", full_inputs.len());
-        let result = <Groth16<Bn254> as SNARK<Fr>>::verify(&self.vk, &full_inputs, &proof.proof)
+        debug!("Calling SNARK::verify with {} inputs", public_inputs.len());
+        let result = <Groth16<Bn254> as SNARK<Fr>>::verify(&self.vk, public_inputs, &proof.proof)
             .map_err(|e| {
                 error!("SNARK::verify error: {:?}", e);
                 VerificationError::Failed(e.to_string())

@@ -3,6 +3,7 @@ proof Divide {
     input b: field;
     witness c: field;
 
+    assert b != 0;
     let quotient = a / b in
     assert quotient === c
 }

@@ -3,5 +3,5 @@ proof Or {
     input b: field;
     witness result: field;
 
-    result === (a + b - a * b)
+    assert result === (a + b - a * b)
 }

@@ -14,6 +14,17 @@ PASSED=0
 FAILED=0
 TOTAL=0
 
+# Prefer workspace build of the CLI if available
+LOF_BIN="$PROJECT_ROOT/target/debug/lof"
+if [ ! -x "$LOF_BIN" ]; then
+    LOF_BIN="$(command -v lof || true)"
+fi
+
+if [ -z "$LOF_BIN" ] || [ ! -x "$LOF_BIN" ]; then
+    echo -e "${RED}Error: unable to find the 'lof' binary. Build the project first.${NC}"
+    exit 1
+fi
+
 echo -e "${BLUE}Running R1CS compilation tests on all .lof files in $TESTS_DIR${NC}"
 echo "=================================================="
 
@@ -74,7 +85,7 @@ for filepath in "$TESTS_DIR"/valid/*.lof "$TESTS_DIR"/invalid/*.lof; do
     echo -n "Compiling $filename to R1CS (expect $expected): "
     
     # Run the R1CS compilation test
-    if lof compile "$temp_filepath" >/dev/null 2>&1; then
+    if "$LOF_BIN" compile "$temp_filepath" >/dev/null 2>&1; then
         # Compilation succeeded
         if [ "$expected" = "COMPILE" ]; then
             echo -e "${GREEN}PASS ✓${NC}"
@@ -103,7 +114,7 @@ for filepath in "$TESTS_DIR"/valid/*.lof "$TESTS_DIR"/invalid/*.lof; do
             ((FAILED++))
             # Show error details for unexpected compilation failures
             echo -e "${RED}Compilation error details:${NC}"
-            lof compile "$temp_filepath" 2>&1 | head -5
+            "$LOF_BIN" compile "$temp_filepath" 2>&1 | head -5
         fi
     fi
     

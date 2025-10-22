@@ -62,7 +62,7 @@ fn test_simple_multiplication_circuit() {
     assert!(cs.is_satisfied().unwrap());
 
     // Check variable counts (arkworks adds 1 for internal bookkeeping)
-    assert_eq!(cs.num_instance_variables(), 4); // ONE + 2 public inputs + 1 arkworks internal
+    assert_eq!(cs.num_instance_variables(), 3); // Arkworks includes ONE + provided public inputs
     assert_eq!(cs.num_witness_variables(), 1); // 1 witness
     assert_eq!(cs.num_constraints(), 1);
 }
@@ -239,7 +239,7 @@ fn test_variable_ordering() {
     assert!(result.is_ok());
 
     // ONE + 3 public inputs + 1 arkworks internal = 5 instance variables
-    assert_eq!(cs.num_instance_variables(), 5);
+    assert_eq!(cs.num_instance_variables(), 4);
     // 2 witnesses are allocated because they're referenced in constraints
     assert_eq!(cs.num_witness_variables(), 2);
 }
@@ -428,7 +428,7 @@ fn test_many_public_inputs() {
     let result = circuit.generate_constraints(cs.clone());
 
     assert!(result.is_ok());
-    assert_eq!(cs.num_instance_variables(), 22); // ONE + 20 public inputs + 1 arkworks internal
+    assert_eq!(cs.num_instance_variables(), 21); // Arkworks includes ONE + provided public inputs
 }
 
 // ============================================================================

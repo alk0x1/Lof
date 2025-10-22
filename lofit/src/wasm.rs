@@ -4,13 +4,14 @@ use ark_groth16::{Groth16, ProvingKey, VerifyingKey};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_snark::SNARK;
 use ark_std::rand::thread_rng;
-use num_bigint::BigInt;
+use num_bigint::{BigInt, Sign};
 use serde::{Deserialize, Serialize};
 use std::io::Cursor;
 use wasm_bindgen::prelude::*;
 
 use crate::circuit::LofCircuit;
 use crate::r1cs::ConstraintSystem;
+use crate::witness::generate_full_witness_with_provided;
 
 /// Convert string to field element
 fn fr_from_str(s: &str) -> Result<Fr, String> {
@@ -18,14 +19,28 @@ fn fr_from_str(s: &str) -> Result<Fr, String> {
         .parse::<BigInt>()
         .map_err(|e| format!("Failed to parse as BigInt: {}", e))?;
 
-    let bytes = bigint.to_string().into_bytes();
-    Fr::from_le_bytes_mod_order(&bytes);
+    let (sign, bytes) = bigint.to_bytes_le();
 
-    // Better approach: use from_str if available
-    let num = s
-        .parse::<u64>()
-        .map_err(|e| format!("Failed to parse as u64: {}", e))?;
-    Ok(Fr::from(num))
+    let mut limbs = [0u64; 4];
+    for (i, chunk) in bytes.chunks(8).enumerate() {
+        if i >= limbs.len() {
+            break;
+        }
+        let mut limb_bytes = [0u8; 8];
+        limb_bytes[..chunk.len()].copy_from_slice(chunk);
+        limbs[i] = u64::from_le_bytes(limb_bytes);
+    }
+
+    let base = ark_ff::BigInt::<4>::new(limbs);
+
+    let mut fr = Fr::from_bigint(base)
+        .ok_or_else(|| "Failed to convert BigInt into field element".to_string())?;
+
+    if sign == Sign::Minus {
+        fr = -fr;
+    }
+
+    Ok(fr)
 }
 
 #[wasm_bindgen]
@@ -72,11 +87,15 @@ impl WasmProver {
         // Split into public inputs and witness based on R1CS structure
         let num_public = self.r1cs.public_inputs.len();
         let public_inputs = witness_values[..num_public].to_vec();
-        let witness_vals = witness_values[num_public..].to_vec();
+        let provided_witness = witness_values[num_public..].to_vec();
+
+        let full_witness =
+            generate_full_witness_with_provided(&self.r1cs, &public_inputs, &provided_witness)
+                .map_err(|e| JsValue::from_str(&format!("Failed to build full witness: {}", e)))?;
 
         let circuit = LofCircuit {
             public_inputs,
-            witness: witness_vals,
+            witness: full_witness,
             constraints: self.r1cs.constraints.clone(),
         };
 
@@ -125,10 +144,7 @@ impl WasmVerifier {
         let proof = ark_groth16::Proof::<Bn254>::deserialize_compressed(proof_bytes)
             .map_err(|e| JsValue::from_str(&format!("Failed to deserialize proof: {}", e)))?;
 
-        let mut full_inputs = vec![Fr::from(1u64)];
-        full_inputs.extend(public_values.iter().cloned());
-
-        let result = Groth16::<Bn254>::verify(&self.verifying_key, &full_inputs, &proof)
+        let result = Groth16::<Bn254>::verify(&self.verifying_key, &public_values, &proof)
             .map_err(|e| JsValue::from_str(&format!("Verification failed: {}", e)))?;
 
         Ok(result)
