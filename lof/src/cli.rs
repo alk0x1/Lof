@@ -30,6 +30,9 @@ enum Target {
 enum Commands {
     Check {
         #[arg(value_name = "FILE")]
+        /// Skip WASM packaging
+        #[arg(long)]
+        skip_wasm: bool,
         file: PathBuf,
 
         #[arg(short, long)]
@@ -38,6 +41,9 @@ enum Commands {
     /// Compile a Lof source file to R1CS or WASM
     Compile {
         #[arg(value_name = "FILE")]
+        /// Skip WASM packaging
+        #[arg(long)]
+        skip_wasm: bool,
         file: PathBuf,
 
         #[arg(short, long)]
@@ -87,7 +93,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             println!("{}", VERSION);
             Ok(())
         }
-        Commands::Check { file, verbose } => {
+        Commands::Check { file, verbose, .. } => {
             if file.extension().and_then(|ext| ext.to_str()) != Some("lof") {
                 let err_msg = "File must have .lof extension";
                 error!("{}", err_msg);
@@ -145,6 +151,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             target,
             output,
             generate_templates,
+            skip_wasm,
         } => {
             if file.extension().and_then(|ext| ext.to_str()) != Some("lof") {
                 let err_msg = "File must have .lof extension";
@@ -154,13 +161,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
             match target {
                 Target::R1cs => compile_r1cs(file.as_path(), verbose, generate_templates),
-                Target::Wasm => compile_wasm(file.as_path(), verbose, output.as_deref()),
+                Target::Wasm => compile_wasm(file.as_path(), verbose, output.as_deref(), skip_wasm),
             }
         }
         Commands::Parse {
             file,
             verbose,
             pretty,
+            ..
         } => {
             if file.extension().and_then(|ext| ext.to_str()) != Some("lof") {
                 let err_msg = "File must have .lof extension";
@@ -251,6 +259,16 @@ fn compile_r1cs(
                 fs::rename(&r1cs_file, &build_r1cs)?;
                 println!("{} {}", "Generated R1CS:".green(), build_r1cs.display());
 
+                let ir_file = file.with_extension("ir");
+                if ir_file.exists() {
+                    let build_ir = build_dir.join(format!("{}.ir", base_name));
+                    fs::rename(&ir_file, &build_ir)?;
+                    println!("{} {}", "Generated IR:".green(), build_ir.display());
+                } else {
+                    warn!("IR file not found after compilation");
+                    println!("{} IR file not generated", "Warning:".yellow());
+                }
+
                 if generate_templates {
                     info!("Generating JSON templates for proof: {}", base_name);
 
@@ -300,28 +318,58 @@ fn compile_r1cs(
 }
 
 fn compile_wasm(
-    _file: &Path,
+    file: &Path,
     verbose: bool,
     output: Option<&Path>,
+    skip_wasm: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if verbose {
         println!("{}", "WASM target selected".yellow());
     }
 
-    warn!("WASM target is not currently supported directly by the `lof` CLI");
-    println!(
-        "{}",
-        "WASM compilation is currently handled by `lofit package-web`.\n\
-         Run `lof compile <file>.lof` first, then:\n  \
-         lofit package-web --input <path/to/build/<file>.r1cs>`"
-            .yellow()
-    );
+    // Step 1: compile to R1CS/IR so downstream tooling has artifacts
+    compile_r1cs(file, verbose, false)?;
 
-    if let Some(dir) = output {
-        println!("{} {}", "Requested output directory:".blue(), dir.display());
+    let skip_wasm = skip_wasm;
+
+    let base_name = file
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .ok_or("Invalid file name")?;
+    let file_dir = file.parent().unwrap_or_else(|| Path::new("."));
+    let build_dir = file_dir.join("build");
+    let r1cs_path = build_dir.join(format!("{}.r1cs", base_name));
+
+    if !r1cs_path.exists() {
+        let err_msg = format!(
+            "R1CS artifact missing at {} after compilation",
+            r1cs_path.display()
+        );
+        error!("{}", err_msg);
+        return Err(err_msg.into());
     }
 
-    Err("WASM target is not available in this build".into())
+    println!();
+    println!(
+        "{} {}",
+        "Packaging circuit for browser proving:".blue(),
+        r1cs_path.display()
+    );
+
+    // Step 2: reuse lofit's packaging helper to build witness/prover assets
+    let package_dir = lofit::package_for_web(&r1cs_path, output, skip_wasm)?;
+
+    println!(
+        "{} {}",
+        "Web-ready assets generated in".green(),
+        package_dir.display()
+    );
+    println!(
+        "{}",
+        "Use `python3 -m http.server` (or similar) inside the package directory to try it.".cyan()
+    );
+
+    Ok(())
 }
 
 fn generate_json_templates(

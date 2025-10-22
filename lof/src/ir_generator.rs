@@ -6,7 +6,7 @@ use crate::ast::{Expression, Operator, Parameter, Pattern, Type, Visibility};
 use crate::ir::{bigint_to_ir_constant, IRCircuit, IRExpr, IRInstruction, IRType};
 use num_bigint::BigInt;
 use std::collections::HashMap;
-use tracing::{debug, warn};
+use tracing::debug;
 
 #[derive(Debug)]
 pub enum IRGenError {
@@ -52,6 +52,9 @@ impl IRGenerator {
             } => {
                 debug!("Converting proof '{}' to IR", name);
 
+                self.instructions.clear();
+                self.variable_substitutions.clear();
+
                 // Collect signals by visibility
                 let mut pub_inputs = Vec::new();
                 let mut witnesses = Vec::new();
@@ -77,14 +80,19 @@ impl IRGenerator {
                 // Convert body to instructions
                 self.convert_expression_to_ir(body)?;
 
-                Ok(IRCircuit {
+                let circuit = IRCircuit {
                     name: name.clone(),
                     pub_inputs,
                     witnesses,
                     outputs,
                     instructions: self.instructions.clone(),
                     functions: HashMap::new(), // TODO: Convert function defs to IR
-                })
+                };
+
+                self.instructions.clear();
+                self.variable_substitutions.clear();
+
+                Ok(circuit)
             }
             _ => Err(IRGenError::UnsupportedExpression(
                 "Expected proof expression".to_string(),
@@ -126,20 +134,25 @@ impl IRGenerator {
         match typ {
             Type::Field { .. } => Ok(IRType::Field),
             Type::Bool { .. } => Ok(IRType::Bool),
-            Type::Array { element_type, size } => Ok(IRType::Array {
-                element_type: Box::new(self.convert_type(element_type)?),
-                size: *size,
-            }),
-            Type::Tuple(types) => {
-                let ir_types: Result<Vec<_>, _> =
-                    types.iter().map(|t| self.convert_type(t)).collect();
-                Ok(IRType::Tuple(ir_types?))
-            }
+            Type::Array { element_type, size } => self.convert_array_type(element_type, *size),
+            Type::Tuple(types) => self.convert_tuple_type(types),
             _ => Err(IRGenError::TypeError(format!(
                 "Unsupported type in IR: {:?}",
                 typ
             ))),
         }
+    }
+
+    fn convert_array_type(&self, element_type: &Type, size: usize) -> Result<IRType, IRGenError> {
+        Ok(IRType::Array {
+            element_type: Box::new(self.convert_type(element_type)?),
+            size,
+        })
+    }
+
+    fn convert_tuple_type(&self, types: &[Type]) -> Result<IRType, IRGenError> {
+        let ir_types: Result<Vec<_>, _> = types.iter().map(|t| self.convert_type(t)).collect();
+        Ok(IRType::Tuple(ir_types?))
     }
 
     /// Convert an expression to IR instructions
@@ -192,10 +205,10 @@ impl IRGenerator {
                     Operator::Assert => {
                         // Constraint equality: left === right
                         self.instructions.push(IRInstruction::Constrain {
-                            left: left_expr,
-                            right: right_expr,
+                            left: left_expr.clone(),
+                            right: right_expr.clone(),
                         });
-                        return Ok(None); // Constraint has no return value
+                        IRExpr::Equal(Box::new(left_expr), Box::new(right_expr))
                     }
                 };
 
@@ -207,12 +220,21 @@ impl IRGenerator {
                 value,
                 body,
             } => {
-                let value_expr = self.convert_expression_to_ir(value)?.ok_or_else(|| {
-                    IRGenError::UnsupportedExpression("Empty value in let".to_string())
-                })?;
+                let value_expr = self.convert_expression_to_ir(value)?;
 
-                // Bind pattern
-                self.bind_pattern(pattern, value_expr)?;
+                match value_expr {
+                    Some(expr) => {
+                        // Bind pattern
+                        self.bind_pattern(pattern, expr)?;
+                    }
+                    None => {
+                        if !matches!(pattern, Pattern::Wildcard) {
+                            return Err(IRGenError::UnsupportedExpression(
+                                "Let binding produced no value".to_string(),
+                            ));
+                        }
+                    }
+                }
 
                 // Process body
                 self.convert_expression_to_ir(body)
@@ -251,11 +273,27 @@ impl IRGenerator {
             }
 
             Expression::Tuple(elements) => {
-                // Process each element (may have side effects)
+                // Evaluate each element (for potential side effects)
+                let mut evaluated_elements = Vec::with_capacity(elements.len());
                 for elem in elements {
-                    self.convert_expression_to_ir(elem)?;
+                    match self.convert_expression_to_ir(elem)? {
+                        Some(expr) => evaluated_elements.push(expr),
+                        None => {
+                            return Err(IRGenError::UnsupportedExpression(
+                                "Tuple elements must produce values".to_string(),
+                            ))
+                        }
+                    }
                 }
-                Ok(None)
+
+                match evaluated_elements.len() {
+                    0 => Ok(Some(Self::ir_constant(0))),
+                    1 => Ok(Some(evaluated_elements.remove(0))),
+                    _ => Err(IRGenError::UnsupportedExpression(
+                        "Tuple expressions with more than one element are not yet supported in IR generation"
+                            .to_string(),
+                    )),
+                }
             }
 
             Expression::ArrayIndex { array, index } => {
@@ -337,10 +375,8 @@ impl IRGenerator {
                         self.match_pattern_condition(&pattern_arm.pattern, &match_value)?;
 
                     // Branch is taken when remaining selector is 1 and the guard holds
-                    let selector = IRExpr::Mul(
-                        Box::new(remaining_selector.clone()),
-                        Box::new(branch_guard),
-                    );
+                    let selector =
+                        IRExpr::Mul(Box::new(remaining_selector.clone()), Box::new(branch_guard));
 
                     // Apply temporary substitutions for pattern bindings
                     let saved_substitutions = self.variable_substitutions.clone();
@@ -348,8 +384,9 @@ impl IRGenerator {
                         self.variable_substitutions.insert(name, binding_expr);
                     }
 
-                    let branch_value =
-                        self.convert_expression_to_ir(&pattern_arm.body)?.ok_or_else(|| {
+                    let branch_value = self
+                        .convert_expression_to_ir(&pattern_arm.body)?
+                        .ok_or_else(|| {
                             IRGenError::UnsupportedExpression(format!(
                                 "Match arm {} did not produce a value",
                                 idx
@@ -360,10 +397,8 @@ impl IRGenerator {
                     self.variable_substitutions = saved_substitutions;
 
                     // Weighted contribution: selector * branch_value
-                    let weighted_branch = IRExpr::Mul(
-                        Box::new(selector.clone()),
-                        Box::new(branch_value),
-                    );
+                    let weighted_branch =
+                        IRExpr::Mul(Box::new(selector.clone()), Box::new(branch_value));
 
                     accumulated = Some(match accumulated {
                         Some(current) => IRExpr::Add(Box::new(current), Box::new(weighted_branch)),
@@ -386,16 +421,14 @@ impl IRGenerator {
                 }
             }
 
-            Expression::ArrayLiteral(_elements) => {
-                // Array literals should be handled in let bindings
-                warn!("Array literal outside let binding - not yet supported");
-                Ok(None)
-            }
+            Expression::ArrayLiteral(_elements) => Err(IRGenError::UnsupportedExpression(
+                "Array literals are not yet supported in IR generation".to_string(),
+            )),
 
-            _ => {
-                warn!("Unsupported expression in IR generation: {:?}", expr);
-                Ok(None)
-            }
+            _ => Err(IRGenError::UnsupportedExpression(format!(
+                "Unsupported expression in IR generation: {:?}",
+                expr
+            ))),
         }
     }
 
@@ -413,10 +446,7 @@ impl IRGenerator {
             Pattern::Literal(lit) => {
                 let literal = IRExpr::Constant(bigint_to_ir_constant(&BigInt::from(*lit)));
                 Ok((
-                    IRExpr::Equal(
-                        Box::new(match_value.clone()),
-                        Box::new(literal),
-                    ),
+                    IRExpr::Equal(Box::new(match_value.clone()), Box::new(literal)),
                     Vec::new(),
                 ))
             }
@@ -425,10 +455,12 @@ impl IRGenerator {
                 Self::ir_constant(1),
                 vec![(name.clone(), match_value.clone())],
             )),
-            Pattern::Tuple(_) | Pattern::Constructor(_, _) => Err(IRGenError::UnsupportedExpression(
-                "Tuple and constructor patterns are not yet supported in IR generation"
-                    .to_string(),
-            )),
+            Pattern::Tuple(_) | Pattern::Constructor(_, _) => {
+                Err(IRGenError::UnsupportedExpression(
+                    "Tuple and constructor patterns are not yet supported in IR generation"
+                        .to_string(),
+                ))
+            }
         }
     }
 
@@ -481,10 +513,9 @@ impl IRGenerator {
                 Ok(())
             }
 
-            Pattern::Constructor(_, _) => {
-                warn!("Constructor patterns not yet supported in IR");
-                Ok(())
-            }
+            Pattern::Constructor(_, _) => Err(IRGenError::UnsupportedExpression(
+                "Constructor patterns are not yet supported in IR generation".to_string(),
+            )),
         }
     }
 }

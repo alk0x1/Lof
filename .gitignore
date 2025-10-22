@@ -38,10 +38,14 @@ inputs/*.json
 pkg/
 wasm-pack.log
 
+# Local cargo installs
+.cargo_local/
+
 # Verification framework
 verification/outputs/
 verification/node_modules/
 verification/package-lock.json
+verification/circuits/**/*.ir
 
 # Code coverage
 coverage/
@@ -75,3 +79,12 @@ Thumbs.db
 examples/
 syntax-highlighter
 syntaxes
+
+# Generated test artefacts
+tests/**/*.ir
+tests/integration/**/build/
+tests/integration/**/inputs/
+tests/integration/**/keys/
+tests/integration/**/proofs/
+
+ROADMAP.md

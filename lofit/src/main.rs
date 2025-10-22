@@ -1,14 +1,14 @@
 use ark_bn254::Fr;
-use clap::{Parser, Subcommand};
-use lofit::{generate_full_witness, generate_full_witness_with_provided};
-use lofit::{ConstraintSystem, LofCircuit, Proof, ProverKey, VerifierKey};
+use clap::{ArgAction, Parser, Subcommand};
+use lofit::{
+    generate_full_witness, generate_full_witness_with_provided, package_for_web, ConstraintSystem,
+    LofCircuit, Proof, ProverKey, VerifierKey,
+};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
 use std::path::PathBuf;
 use tracing::{debug, error, info, instrument, warn};
-
-mod package_web;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -62,6 +62,8 @@ enum Commands {
         input: PathBuf,
         #[arg(short, long, help = "Output directory for web package")]
         output: Option<PathBuf>,
+        #[arg(long, action = ArgAction::SetTrue, help = "Skip building WASM artifacts (generate sources only)")]
+        skip_wasm: bool,
     },
     /// Show version information
     Version,
@@ -145,8 +147,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("{}", VERSION);
             Ok(())
         }
-        Commands::PackageWeb { input, output } => {
-            package_web::package_for_web(&input, output.as_deref())?;
+        Commands::PackageWeb {
+            input,
+            output,
+            skip_wasm,
+        } => {
+            let package_dir = package_for_web(&input, output.as_deref(), skip_wasm)?;
+            println!("Web package ready at {}", package_dir.display());
             Ok(())
         }
         Commands::Setup {

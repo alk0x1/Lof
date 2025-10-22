@@ -8,17 +8,23 @@
 /// 5. Generate integration example code
 use std::fs::{self, File};
 use std::io::BufWriter;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::{ConstraintSystem, LofCircuit, ProverKey};
 use ark_bn254::Fr;
 use tracing::{error, info, warn};
 
+const FALLBACK_LOFIT_JS: &str = include_str!("../pkg/lofit.js");
+const FALLBACK_LOFIT_D_TS: &str = include_str!("../pkg/lofit.d.ts");
+const FALLBACK_LOFIT_WASM_D_TS: &str = include_str!("../pkg/lofit_bg.wasm.d.ts");
+const FALLBACK_LOFIT_WASM: &[u8] = include_bytes!("../pkg/lofit_bg.wasm");
+
 pub fn package_for_web(
     r1cs_path: &Path,
     output_dir: Option<&Path>,
-) -> Result<(), Box<dyn std::error::Error>> {
+    skip_wasm: bool,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
     info!("🚀 Packaging circuit for web deployment...");
     info!("");
 
@@ -29,8 +35,10 @@ pub fn package_for_web(
         .ok_or("Invalid R1CS filename")?;
 
     // Determine output directory
-    let output_base = output_dir.unwrap_or_else(|| Path::new("."));
-    let package_dir = output_base.join(format!("{}_web", circuit_name));
+    let package_dir = match output_dir {
+        Some(dir) => dir.to_path_buf(),
+        None => Path::new(".").join(format!("{}_web", circuit_name)),
+    };
 
     info!("Circuit: {}", circuit_name);
     info!("Package directory: {}", package_dir.display());
@@ -53,16 +61,28 @@ pub fn package_for_web(
     info!("");
 
     // Step 3: Generate witness calculator WASM
-    info!("Step 3/5: Generating witness calculator WASM...");
-    generate_witness_wasm(r1cs_path, &package_dir, circuit_name)?;
-    info!("✅ Witness calculator WASM generated");
-    info!("");
+    if skip_wasm {
+        info!("Step 3/5: Skipping witness calculator WASM build (sources will be generated)");
+        generate_witness_wasm(r1cs_path, &package_dir, circuit_name, true)?;
+        info!("✅ Witness calculator sources generated (build later with wasm-pack)");
+        info!("");
 
-    // Step 4: Build/copy lofit WASM
-    info!("Step 4/5: Building lofit WASM prover...");
-    build_lofit_wasm(&package_dir)?;
-    info!("✅ Lofit WASM prover ready");
-    info!("");
+        info!("Step 4/5: Skipping lofit WASM prover build");
+        write_prover_skip_instructions(&package_dir)?;
+        info!("✅ Added instructions for building prover WASM later");
+        info!("");
+    } else {
+        info!("Step 3/5: Generating witness calculator WASM...");
+        generate_witness_wasm(r1cs_path, &package_dir, circuit_name, false)?;
+        info!("✅ Witness calculator WASM generated");
+        info!("");
+
+        // Step 4: Build/copy lofit WASM
+        info!("Step 4/5: Building lofit WASM prover...");
+        build_lofit_wasm(&package_dir)?;
+        info!("✅ Lofit WASM prover ready");
+        info!("");
+    }
 
     // Step 5: Generate integration examples
     info!("Step 5/5: Generating integration examples...");
@@ -71,7 +91,11 @@ pub fn package_for_web(
     info!("");
 
     // Success!
-    info!("🎉 Web package ready!");
+    if skip_wasm {
+        info!("🎉 Web package ready! (WASM build deferred)");
+    } else {
+        info!("🎉 Web package ready!");
+    }
     info!("");
     info!("Package location: {}", package_dir.display());
     info!("");
@@ -80,12 +104,11 @@ pub fn package_for_web(
     info!("  2. Serve the files with a web server");
     info!("  3. See integration.js for usage examples");
     info!("");
-    info!("Quick test:");
-    info!("  cd {}", package_dir.display());
-    info!("  python3 -m http.server 8000");
-    info!("  # Open http://localhost:8000 in your browser");
+    info!("Quick check:");
+    info!("  Review integration.js for wiring details");
+    info!("  Serve the package directory with your preferred dev server");
 
-    Ok(())
+    Ok(package_dir)
 }
 
 fn create_directory_structure(base: &Path) -> Result<(), Box<dyn std::error::Error>> {
@@ -139,6 +162,7 @@ fn generate_witness_wasm(
     r1cs_path: &Path,
     package_dir: &Path,
     circuit_name: &str,
+    skip_wasm: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Find the .ir file (should be next to .r1cs)
     let ir_path = r1cs_path.with_extension("ir");
@@ -197,9 +221,32 @@ fn generate_witness_wasm(
 
     info!("  Generated witness calculator source");
 
-    // Build WASM using wasm-pack
     let wasm_project_dir = witness_output_dir.join(format!("{}_witness_wasm", circuit_name));
 
+    if skip_wasm {
+        let sources_dir = package_dir.join("witness_sources");
+        if sources_dir.exists() {
+            fs::remove_dir_all(&sources_dir)?;
+        }
+        fs::create_dir_all(&sources_dir)?;
+        let target_dir = sources_dir.join(format!("{}_witness_wasm", circuit_name));
+        if target_dir.exists() {
+            fs::remove_dir_all(&target_dir)?;
+        }
+        fs::rename(&wasm_project_dir, &target_dir)?;
+        fs::remove_dir_all(&witness_output_dir)?;
+
+        let notes_path = package_dir.join("witness").join("README.txt");
+        fs::create_dir_all(notes_path.parent().unwrap())?;
+        let notes = format!(
+            "WASM build skipped.\n\nTo build the witness calculator manually:\n  cd ../witness_sources/{}_witness_wasm\n  wasm-pack build --target web\n  cp pkg/* ../witness/\n",
+            circuit_name
+        );
+        fs::write(&notes_path, notes)?;
+        return Ok(());
+    }
+
+    // Build WASM using wasm-pack
     if !wasm_project_dir.exists() {
         error!(
             "Witness WASM project not found at: {}",
@@ -256,24 +303,64 @@ fn generate_witness_wasm(
 }
 
 fn build_lofit_wasm(package_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    // Find lofit source directory (assuming we're running from project)
-    let current_exe = std::env::current_exe()?;
-    let project_root = current_exe
-        .ancestors()
-        .find(|p| p.join("Cargo.toml").exists())
-        .ok_or("Could not find project root")?;
+    match try_build_lofit_wasm(package_dir) {
+        Ok(_) => Ok(()),
+        Err(build_err) => {
+            warn!("  wasm-pack build for lofit failed: {}", build_err);
+            warn!("  Falling back to prebuilt prover bundle shipped with lofit");
+            match copy_prebuilt_lofit_wasm(package_dir) {
+                Ok(_) => {
+                    info!("  Using prebuilt prover bundle from lofit/pkg");
+                    Ok(())
+                }
+                Err(fallback_err) => {
+                    error!("  Failed to copy prebuilt prover bundle: {}", fallback_err);
+                    Err(build_err)
+                }
+            }
+        }
+    }
+}
 
-    let lofit_dir = project_root.join("lofit");
-
-    if !lofit_dir.exists() {
-        warn!("Lofit directory not found at: {}", lofit_dir.display());
-        warn!("Attempting to build from current directory...");
-
-        // Try building from current directory
-        return build_lofit_wasm_from_cwd(package_dir);
+fn try_build_lofit_wasm(package_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    // Try explicit override first
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Ok(path) = std::env::var("LOFIT_SOURCE_DIR") {
+        candidates.push(PathBuf::from(path));
     }
 
+    // Attempt to locate from current executable (works when running from repo)
+    if let Ok(current_exe) = std::env::current_exe() {
+        if let Some(root) = current_exe
+            .ancestors()
+            .find(|p| p.join("Cargo.toml").exists())
+        {
+            candidates.push(root.join("lofit"));
+        }
+    }
+
+    // Fallback to the build-time manifest directory (works for cargo install if source still present)
+    candidates.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")));
+
+    let maybe_source = candidates
+        .iter()
+        .find(|dir| dir.join("Cargo.toml").exists())
+        .cloned();
+
+    let lofit_dir = if let Some(dir) = maybe_source {
+        dir
+    } else {
+        info!("  Unable to locate lofit source automatically, attempting current directory...");
+        return build_lofit_wasm_from_cwd(package_dir);
+    };
+
     info!("  Building lofit WASM from: {}", lofit_dir.display());
+
+    let prover_out_dir = package_dir.join("prover");
+    fs::create_dir_all(&prover_out_dir)?;
+    let prover_out_abs = prover_out_dir
+        .canonicalize()
+        .unwrap_or_else(|_| prover_out_dir.clone());
 
     // Build lofit WASM
     let output = Command::new("wasm-pack")
@@ -281,7 +368,7 @@ fn build_lofit_wasm(package_dir: &Path) -> Result<(), Box<dyn std::error::Error>
         .arg("--target")
         .arg("web")
         .arg("--out-dir")
-        .arg(package_dir.join("prover"))
+        .arg(&prover_out_abs)
         .current_dir(&lofit_dir)
         .output()?;
 
@@ -292,6 +379,33 @@ fn build_lofit_wasm(package_dir: &Path) -> Result<(), Box<dyn std::error::Error>
     }
 
     info!("  Lofit WASM: {}/prover", package_dir.display());
+
+    Ok(())
+}
+
+fn write_prover_skip_instructions(package_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let prover_dir = package_dir.join("prover");
+    fs::create_dir_all(&prover_dir)?;
+
+    let instructions = format!(
+        "WASM build skipped.\n\nTo build the prover module manually:\n  1. Ensure the lofit source is available (e.g. export LOFIT_SOURCE_DIR=/path/to/lofit).\n  2. From the lofit crate directory, run:\n       wasm-pack build --target web --out-dir {}\n",
+        prover_dir.display()
+    );
+    fs::write(prover_dir.join("README.txt"), instructions)?;
+    Ok(())
+}
+
+fn copy_prebuilt_lofit_wasm(package_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let dest_dir = package_dir.join("prover");
+    fs::create_dir_all(&dest_dir)?;
+
+    fs::write(dest_dir.join("lofit.js"), FALLBACK_LOFIT_JS)?;
+    fs::write(dest_dir.join("lofit.d.ts"), FALLBACK_LOFIT_D_TS)?;
+    fs::write(
+        dest_dir.join("lofit_bg.wasm.d.ts"),
+        FALLBACK_LOFIT_WASM_D_TS,
+    )?;
+    fs::write(dest_dir.join("lofit_bg.wasm"), FALLBACK_LOFIT_WASM)?;
 
     Ok(())
 }
@@ -325,24 +439,34 @@ fn generate_integration_code(
     package_dir: &Path,
     circuit_name: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Generate integration.js
-    let integration_code = format!(
-        r#"// Integration Example for {}
-// This file shows how to use the generated WASM modules
+    let r1cs_path = package_dir
+        .join("build")
+        .join(format!("{}.r1cs", circuit_name));
+    let r1cs_file = File::open(&r1cs_path)?;
+    let r1cs = ConstraintSystem::from_file(r1cs_file)?;
 
-import initWitness, {{ compute_witness }} from './witness/{}_witness_wasm.js';
-import initLofit, {{ WasmProver, init_panic_hook }} from './prover/lofit.js';
+    let public_inputs_json = serde_json::to_string(&r1cs.public_inputs)?;
+    let witness_inputs_json = serde_json::to_string(&r1cs.witnesses)?;
+
+    let integration_template = r#"// Integration Example for __CIRCUIT_NAME__
+// Auto-generated helper that wires the witness calculator and prover WASM modules together.
+
+import initWitness, { compute_witness } from './witness/__CIRCUIT_NAME___witness_wasm.js';
+import initLofit, { WasmProver, init_panic_hook } from './prover/lofit.js';
 
 // Global state
 let witnessReady = false;
 let proverReady = false;
 let wasmProver = null;
 
+export const PUBLIC_INPUT_SIGNALS = __PUBLIC_INPUTS__;
+export const WITNESS_SIGNALS = __WITNESS_INPUTS__;
+
 // Initialize all WASM modules
-async function initializeWasm() {{
+async function initializeWasm() {
     console.log('Loading WASM modules...');
 
-    try {{
+    try {
         // Initialize witness calculator
         await initWitness();
         witnessReady = true;
@@ -354,10 +478,10 @@ async function initializeWasm() {{
         console.log('✅ Lofit prover ready');
 
         // Load R1CS and proving key
-        const r1csResp = await fetch('./build/{}.r1cs');
+        const r1csResp = await fetch('./build/__CIRCUIT_NAME__.r1cs');
         const r1csBytes = new Uint8Array(await r1csResp.arrayBuffer());
 
-        const pkResp = await fetch('./keys/{}_pk.bin');
+        const pkResp = await fetch('./keys/__CIRCUIT_NAME___pk.bin');
         const pkBytes = new Uint8Array(await pkResp.arrayBuffer());
 
         // Create prover instance
@@ -366,193 +490,159 @@ async function initializeWasm() {{
         console.log('✅ Prover initialized');
 
         return true;
-    }} catch (error) {{
+    } catch (error) {
         console.error('Failed to initialize WASM:', error);
         return false;
-    }}
-}}
+    }
+}
 
 // Generate a zero-knowledge proof
-async function generateProof(inputs) {{
-    if (!witnessReady || !proverReady) {{
+async function generateProof(inputs) {
+    if (!witnessReady || !proverReady) {
         throw new Error('WASM not initialized. Call initializeWasm() first.');
-    }}
+    }
 
     console.log('Computing witness...');
     const witness = compute_witness(inputs);
     console.log('✅ Witness computed:', witness);
 
-    // Convert witness to array format
-    // NOTE: Order must match your circuit's signal order!
-    // Adjust this based on your circuit structure
-    const witnessArray = Object.values(witness).map(v => v.toString());
+    const publicInputs = buildPublicInputs(witness);
+    const witnessArray = buildWitnessArray(witness);
 
     console.log('Generating proof...');
     const proofBytes = await wasmProver.prove(witnessArray);
     console.log('✅ Proof generated:', proofBytes.length, 'bytes');
 
-    return proofBytes;
-}}
+    return {
+        proofBytes,
+        witness,
+        witnessArray,
+        publicInputs,
+    };
+}
 
 // Send proof to server for verification
-async function verifyProof(proofBytes, publicInputs) {{
-    const response = await fetch('/api/verify', {{
+async function verifyProof(proofBytes, publicInputs) {
+    const response = await fetch('/api/verify', {
         method: 'POST',
-        headers: {{ 'Content-Type': 'application/json' }},
-        body: JSON.stringify({{
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
             proof_bytes: Array.from(proofBytes),
-            public_inputs: publicInputs
-        }})
-    }});
+            public_inputs: publicInputs,
+        }),
+    });
 
     const result = await response.json();
     return result.verified;
-}}
+}
 
-// Example usage
-async function example() {{
-    // Initialize
-    await initializeWasm();
+function buildWitnessArray(witnessOutput) {
+    const orderedValues = [];
 
-    // Your circuit inputs (adjust based on your circuit)
-    const inputs = {{
-        // Add your input fields here
-        // Example: input_value: "42"
-    }};
+    for (const name of PUBLIC_INPUT_SIGNALS) {
+        if (!(name in witnessOutput)) {
+            throw new Error(`Missing public input '${name}' in witness output`);
+        }
+        orderedValues.push(witnessOutput[name].toString());
+    }
 
-    // Generate proof
-    const proof = await generateProof(inputs);
+    for (const name of WITNESS_SIGNALS) {
+        if (!(name in witnessOutput)) {
+            throw new Error(`Missing witness signal '${name}' in witness output`);
+        }
+        orderedValues.push(witnessOutput[name].toString());
+    }
 
-    // Verify proof (requires server endpoint)
-    const publicInputs = {{
-        // Add your public inputs here
-    }};
+    return orderedValues;
+}
 
-    const isValid = await verifyProof(proof, publicInputs);
-    console.log('Proof verified:', isValid);
-}}
+function buildPublicInputs(witnessOutput) {
+    const pubInputs = {};
+    for (const name of PUBLIC_INPUT_SIGNALS) {
+        pubInputs[name] = witnessOutput[name].toString();
+    }
+    return pubInputs;
+}
 
 // Export for use in other modules
-export {{ initializeWasm, generateProof, verifyProof }};
-"#,
-        circuit_name, circuit_name, circuit_name, circuit_name
-    );
+export { initializeWasm, generateProof, verifyProof, buildWitnessArray, buildPublicInputs };
+"#;
+
+    let integration_code = integration_template
+        .replace("__CIRCUIT_NAME__", circuit_name)
+        .replace("__PUBLIC_INPUTS__", &public_inputs_json)
+        .replace("__WITNESS_INPUTS__", &witness_inputs_json);
 
     fs::write(package_dir.join("integration.js"), integration_code)?;
 
-    // Generate README
-    let readme = format!(
-        r#"# {} Web Package
+    let readme_template = r#"# __CIRCUIT_NAME__ Web Package
 
-This package contains everything needed to generate and verify zero-knowledge proofs for the `{}` circuit in a web browser.
+This package contains everything needed to generate and verify zero-knowledge proofs for the `__CIRCUIT_NAME__` circuit in a web browser.
 
 ## Package Contents
 
 ```
-{}_web/
+__CIRCUIT_NAME___web/
 ├── build/
-│   └── {}.r1cs              # Compiled circuit constraints
+│   └── __CIRCUIT_NAME__.r1cs              # Compiled circuit constraints
 ├── keys/
-│   ├── {}_pk.bin            # Proving key
-│   └── {}_vk.bin            # Verification key
+│   ├── __CIRCUIT_NAME___pk.bin            # Proving key
+│   └── __CIRCUIT_NAME___vk.bin            # Verification key
 ├── witness/
-│   ├── {}_witness_wasm.js   # Witness calculator (JS bindings)
-│   └── {}_witness_wasm_bg.wasm  # Witness calculator (WASM binary)
+│   ├── __CIRCUIT_NAME___witness_wasm.js   # Witness calculator (JS bindings)
+│   └── __CIRCUIT_NAME___witness_wasm_bg.wasm  # Witness calculator (WASM binary)
 ├── prover/
 │   ├── lofit.js             # zkSNARK prover (JS bindings)
 │   └── lofit_bg.wasm        # zkSNARK prover (WASM binary)
-├── integration.js           # Example integration code
+├── integration.js           # Example integration code (ES module)
 └── README.md                # This file
 ```
 
 ## Quick Start
 
-### 1. Serve the files
+Serve this directory with your preferred dev server and import the generated helpers:
 
-```bash
-# Python 3
-python3 -m http.server 8000
+```js
+import { initializeWasm, generateProof } from './integration.js';
 
-# Node.js (with http-server)
-npx http-server -p 8000
+await initializeWasm({
+  r1csUrl: './build/__CIRCUIT_NAME__.r1cs',
+  provingKeyUrl: './keys/__CIRCUIT_NAME___pk.bin',
+  witnessModuleUrl: './witness/__CIRCUIT_NAME___witness_wasm.js',
+});
 
-# Or use any web server
+const { proofBytes } = await generateProof({ /* your inputs */ });
 ```
-
-### 2. Use in your web application
-
-```html
-<!DOCTYPE html>
-<html>
-<head>
-    <title>{} Proof</title>
-</head>
-<body>
-    <h1>Zero-Knowledge Proof Demo</h1>
-    <script type="module">
-        import {{ initializeWasm, generateProof }} from './integration.js';
-
-        async function main() {{
-            // Initialize WASM modules
-            await initializeWasm();
-
-            // Your circuit inputs
-            const inputs = {{
-                // TODO: Add your input fields
-            }};
-
-            // Generate proof
-            const proof = await generateProof(inputs);
-            console.log('Proof generated!', proof);
-        }}
-
-        main();
-    </script>
-</body>
-</html>
-```
-
-### 3. Customize integration.js
-
-The `integration.js` file contains example code. You'll need to:
-
-1. **Update witness array construction** - Match your circuit's signal order
-2. **Add your input fields** - Based on your circuit's public inputs and witnesses
-3. **Configure public inputs** - For proof verification
 
 ## API Reference
 
 ### initializeWasm()
 
-Loads all WASM modules and initializes the prover.
+Initializes the witness calculator and prover WASM modules.
 
-```javascript
+```js
 await initializeWasm();
 ```
 
 ### generateProof(inputs)
 
-Generates a zero-knowledge proof from inputs.
+Computes the witness, packs it into the expected order, and returns proof bytes plus helper metadata.
 
-```javascript
-const inputs = {{
-    input_field: "value",
-    witness_field: "secret_value"
-}};
-
-const proofBytes = await generateProof(inputs);
+```js
+const {
+  proofBytes,
+  witness,
+  witnessArray,
+  publicInputs,
+} = await generateProof({ field_a: '1', private_secret: '42' });
 ```
 
 ### verifyProof(proofBytes, publicInputs)
 
-Verifies a proof (requires server endpoint).
+POST helper for sending proofs to a server endpoint.
 
-```javascript
-const publicInputs = {{
-    input_field: "value"
-}};
-
-const isValid = await verifyProof(proofBytes, publicInputs);
+```js
+await verifyProof(proofBytes, publicInputs);
 ```
 
 ## Server-Side Verification
@@ -561,62 +651,19 @@ Use the `lofit verify` command to verify proofs on the server:
 
 ```bash
 cargo run --bin lofit -- verify \
-    -i {}.r1cs \
-    -v keys/{}_vk.bin \
-    -p proofs/proof.bin \
-    -u inputs/public.json
+    --input build/__CIRCUIT_NAME__.r1cs \
+    --verification-key keys/__CIRCUIT_NAME___vk.bin \
+    --proof proofs/__CIRCUIT_NAME___proof.bin \
+    --public-inputs inputs/__CIRCUIT_NAME___public.json
 ```
 
 ## Privacy Notes
 
 - **Witness values** (private inputs) are computed in the browser
 - **Only the proof** is sent to the server for verification
-- The server **never sees** your private witness values
-- This achieves true zero-knowledge privacy
+"#;
 
-## Troubleshooting
-
-### WASM modules not loading
-
-- Ensure you're serving files over HTTP/HTTPS (not `file://`)
-- Check browser console for CORS errors
-- Verify all files are in the correct directories
-
-### Proof generation fails
-
-- Check that witness values are in the correct order
-- Verify all required inputs are provided
-- Enable verbose logging: check browser console
-
-### Verification fails
-
-- Ensure public inputs match between prover and verifier
-- Check that you're using the correct verification key
-- Verify the proof wasn't corrupted during transmission
-
-## Next Steps
-
-- Read the [Lof documentation](../../docs/) for circuit syntax
-- See example circuits in `../../features/`
-- Check the verification tests in `../../verification/`
-
-## License
-
-Same as the Lof project.
-"#,
-        circuit_name,
-        circuit_name,
-        circuit_name,
-        circuit_name,
-        circuit_name,
-        circuit_name,
-        circuit_name,
-        circuit_name,
-        circuit_name,
-        circuit_name,
-        circuit_name
-    );
-
+    let readme = readme_template.replace("__CIRCUIT_NAME__", circuit_name);
     fs::write(package_dir.join("README.md"), readme)?;
 
     info!("  integration.js: Example integration code");

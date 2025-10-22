@@ -2,6 +2,15 @@
 name = "lofit"
 version = "0.1.0"
 edition = "2021"
+include = [
+    "src/**",
+    "pkg/lofit.js",
+    "pkg/lofit_bg.wasm",
+    "pkg/lofit.d.ts",
+    "pkg/lofit_bg.wasm.d.ts",
+    "Cargo.toml",
+    "README.md",
+]
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -28,4 +37,6 @@ wasm-bindgen = "0.2"
 serde-wasm-bindgen = "0.6"
 console_error_panic_hook = "0.1"
 num-bigint = "0.4"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 which = "6.0"

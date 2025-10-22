@@ -207,16 +207,10 @@ impl TypeChecker {
         }
     }
 
-    fn ensure_nonzero_field(
-        &self,
-        expr: &Expression,
-        typ: &Type,
-    ) -> Result<(), TypeError> {
+    fn ensure_nonzero_field(&self, expr: &Expression, typ: &Type) -> Result<(), TypeError> {
         if let Expression::Number(value) = expr {
             if *value == 0 {
-                return Err(TypeError::NonZeroRequired {
-                    found: typ.clone(),
-                });
+                return Err(TypeError::NonZeroRequired { found: typ.clone() });
             }
             return Ok(());
         }
@@ -226,12 +220,8 @@ impl TypeChecker {
                 refinement: Some(Refinement::NonZero),
                 ..
             } => Ok(()),
-            Type::Bool { .. } => Err(TypeError::NonZeroRequired {
-                found: typ.clone(),
-            }),
-            _ => Err(TypeError::NonZeroRequired {
-                found: typ.clone(),
-            }),
+            Type::Bool { .. } => Err(TypeError::NonZeroRequired { found: typ.clone() }),
+            _ => Err(TypeError::NonZeroRequired { found: typ.clone() }),
         }
     }
 
@@ -426,7 +416,7 @@ impl TypeChecker {
             return Ok(function_type);
         }
 
-        for _ in arguments {
+        for argument in arguments {
             match function_type {
                 Type::Function {
                     params,
@@ -436,6 +426,20 @@ impl TypeChecker {
                         return Err(TypeError::ArgumentCountMismatch {
                             expected: 1,
                             found: params.len(),
+                        });
+                    }
+
+                    let expected_param = params
+                        .into_iter()
+                        .next()
+                        .expect("function type with zero params should be caught above");
+
+                    let argument_type = self.check_expression(argument)?;
+
+                    if !self.types_compatible(&expected_param, &argument_type) {
+                        return Err(TypeError::TypeMismatch {
+                            expected: expected_param,
+                            found: argument_type,
                         });
                     }
 
@@ -470,13 +474,24 @@ impl TypeChecker {
                 body,
             } => {
                 let value_type = self.check_expression(value)?;
-                let mut symbols_backup = HashMap::new();
+
+                let mut bound_variables = Vec::new();
+                Self::collect_pattern_variables(pattern, &mut bound_variables);
+
+                let mut previous_symbols = HashMap::new();
+                let mut previous_dependencies = HashMap::new();
+
+                for var in &bound_variables {
+                    if let Some(existing) = self.symbols.get(var).cloned() {
+                        previous_symbols.insert(var.clone(), existing);
+                    }
+                    if let Some(existing_deps) = self.dependencies.get(var).cloned() {
+                        previous_dependencies.insert(var.clone(), existing_deps);
+                    }
+                }
 
                 match pattern {
                     Pattern::Variable(var_name) => {
-                        if let Some(old_type) = self.symbols.get(var_name) {
-                            symbols_backup.insert(var_name.clone(), old_type.clone());
-                        }
                         self.symbols.insert(var_name.clone(), value_type.clone());
 
                         // ALWAYS track dependencies through let bindings
@@ -486,6 +501,8 @@ impl TypeChecker {
                         self.extract_vars(value, &mut deps);
                         if !deps.is_empty() {
                             self.dependencies.insert(var_name.clone(), deps);
+                        } else {
+                            self.dependencies.remove(var_name);
                         }
                     }
                     _ => {
@@ -495,11 +512,17 @@ impl TypeChecker {
 
                 let body_type = self.check_expression(body)?;
 
-                if let Pattern::Variable(var_name) = pattern {
-                    if let Some(old_type) = symbols_backup.get(var_name) {
-                        self.symbols.insert(var_name.clone(), old_type.clone());
+                for var in bound_variables {
+                    if let Some(old_type) = previous_symbols.remove(&var) {
+                        self.symbols.insert(var.clone(), old_type);
                     } else {
-                        self.symbols.remove(var_name);
+                        self.symbols.remove(&var);
+                    }
+
+                    if let Some(old_deps) = previous_dependencies.remove(&var) {
+                        self.dependencies.insert(var.clone(), old_deps);
+                    } else {
+                        self.dependencies.remove(&var);
                     }
                 }
 
@@ -604,61 +627,70 @@ impl TypeChecker {
                 self.apply_function(function_type, arguments)
             }
             Expression::Proof { signals, body, .. } => {
-                // Track witnesses for constraint validation
-                for signal in signals {
-                    let resolved_type = self.resolve_type(&signal.typ)?;
+                let saved_symbols = self.symbols.clone();
+                let saved_dependencies = self.dependencies.clone();
+                let saved_witnesses = std::mem::take(&mut self.witnesses);
 
-                    // Inputs and outputs are inherently constrained (they're public)
-                    let final_type = if signal.visibility == Visibility::Input
-                        || signal.visibility == Visibility::Output
-                    {
-                        match resolved_type {
-                            Type::Field { refinement, .. } => {
-                                Self::field_type(ConstraintStatus::Constrained, refinement)
+                let result = (|| -> Result<Type, TypeError> {
+                    // Track witnesses for constraint validation
+                    for signal in signals {
+                        let resolved_type = self.resolve_type(&signal.typ)?;
+
+                        // Inputs and outputs are inherently constrained (they're public)
+                        let final_type = if signal.visibility == Visibility::Input
+                            || signal.visibility == Visibility::Output
+                        {
+                            match resolved_type {
+                                Type::Field { refinement, .. } => {
+                                    Self::field_type(ConstraintStatus::Constrained, refinement)
+                                }
+                                Type::Bool { .. } => Self::bool_type(ConstraintStatus::Constrained),
+                                other => other,
                             }
-                            Type::Bool { .. } => Self::bool_type(ConstraintStatus::Constrained),
-                            other => other,
-                        }
-                    } else {
-                        resolved_type
-                    };
+                        } else {
+                            resolved_type
+                        };
 
-                    self.symbols.insert(signal.name.clone(), final_type);
+                        self.symbols.insert(signal.name.clone(), final_type);
 
-                    // Track witnesses for later validation (NOT inputs or outputs)
-                    if signal.visibility == Visibility::Witness {
-                        self.witnesses.insert(signal.name.clone());
-                    }
-                }
-
-                let _body_type = self.check_expression(body)?;
-
-                // Validate all witnesses are constrained
-                for witness_name in &self.witnesses {
-                    if let Some(typ) = self.symbols.get(witness_name) {
-                        let is_unconstrained = matches!(
-                            typ,
-                            Type::Field {
-                                constraint: ConstraintStatus::Unconstrained,
-                                ..
-                            } | Type::Bool {
-                                constraint: ConstraintStatus::Unconstrained
-                            }
-                        );
-
-                        if is_unconstrained {
-                            return Err(TypeError::UnconstrainedWitness {
-                                name: witness_name.clone(),
-                                witness_type: typ.clone(),
-                            });
+                        // Track witnesses for later validation (NOT inputs or outputs)
+                        if signal.visibility == Visibility::Witness {
+                            self.witnesses.insert(signal.name.clone());
                         }
                     }
-                }
 
-                // Clear witnesses for next proof block
-                self.witnesses.clear();
+                    let _body_type = self.check_expression(body)?;
 
-                Ok(Type::Unit)
+                    // Validate all witnesses are constrained
+                    for witness_name in &self.witnesses {
+                        if let Some(typ) = self.symbols.get(witness_name) {
+                            let is_unconstrained = matches!(
+                                typ,
+                                Type::Field {
+                                    constraint: ConstraintStatus::Unconstrained,
+                                    ..
+                                } | Type::Bool {
+                                    constraint: ConstraintStatus::Unconstrained
+                                }
+                            );
+
+                            if is_unconstrained {
+                                return Err(TypeError::UnconstrainedWitness {
+                                    name: witness_name.clone(),
+                                    witness_type: typ.clone(),
+                                });
+                            }
+                        }
+                    }
+
+                    Ok(Type::Unit)
+                })();
+
+                self.symbols = saved_symbols;
+                self.dependencies = saved_dependencies;
+                self.witnesses = saved_witnesses;
+
+                result
             }
             Expression::Block {
                 statements,
@@ -786,13 +818,38 @@ impl TypeChecker {
             }
 
             Expression::Component { signals, body, .. } => {
-                // Component is similar to proof - define signals and check body
+                let mut bound_names = Vec::new();
+                let mut previous_symbols = HashMap::new();
+                let mut previous_dependencies = HashMap::new();
+
                 for signal in signals {
+                    if let Some(existing) = self.symbols.get(&signal.name).cloned() {
+                        previous_symbols.insert(signal.name.clone(), existing);
+                    }
+                    if let Some(existing_deps) = self.dependencies.get(&signal.name).cloned() {
+                        previous_dependencies.insert(signal.name.clone(), existing_deps);
+                    }
+
                     let resolved_type = self.resolve_type(&signal.typ)?;
                     self.symbols.insert(signal.name.clone(), resolved_type);
+                    bound_names.push(signal.name.clone());
                 }
 
                 let _body_type = self.check_expression(body)?;
+
+                for name in bound_names {
+                    if let Some(old_type) = previous_symbols.remove(&name) {
+                        self.symbols.insert(name.clone(), old_type);
+                    } else {
+                        self.symbols.remove(&name);
+                    }
+
+                    if let Some(old_deps) = previous_dependencies.remove(&name) {
+                        self.dependencies.insert(name.clone(), old_deps);
+                    } else {
+                        self.dependencies.remove(&name);
+                    }
+                }
 
                 Ok(Type::Unit)
             }
@@ -816,6 +873,23 @@ impl TypeChecker {
                 Ok(Type::Tuple(resolved_elements))
             }
             _ => Ok(typ.clone()),
+        }
+    }
+
+    fn collect_pattern_variables(pattern: &Pattern, vars: &mut Vec<String>) {
+        match pattern {
+            Pattern::Variable(name) => vars.push(name.clone()),
+            Pattern::Tuple(patterns) => {
+                for p in patterns {
+                    Self::collect_pattern_variables(p, vars);
+                }
+            }
+            Pattern::Constructor(_, patterns) => {
+                for p in patterns {
+                    Self::collect_pattern_variables(p, vars);
+                }
+            }
+            Pattern::Wildcard | Pattern::Literal(_) => {}
         }
     }
 
@@ -885,8 +959,6 @@ impl TypeChecker {
                 } else {
                     let offending = if !left_numeric {
                         left.clone()
-                    } else if !right_numeric {
-                        right.clone()
                     } else {
                         right.clone()
                     };

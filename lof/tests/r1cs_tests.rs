@@ -448,3 +448,136 @@ fn test_constraint_count_accuracy() {
     assert!(r1cs.constraints.len() >= 3);
     assert_eq!(r1cs.pub_inputs.len(), 6); // 3 inputs + 3 outputs
 }
+
+#[test]
+fn test_r1cs_generator_resets_state_between_proofs() {
+    let source = r#"
+    proof FirstProof {
+        input x: field;
+        output out: field;
+        out === x;
+    }
+
+    proof SecondProof {
+        input x: field;
+        output out: field;
+        out === x;
+    }
+    "#;
+
+    let lexer = Lexer::new(source);
+    let mut parser = Parser::new(lexer);
+    let ast = parser.parse_program().expect("parse program");
+
+    let mut type_checker = TypeChecker::new();
+    type_checker
+        .check_program(&ast)
+        .expect("type check program");
+
+    let mut generator = R1CSGenerator::new();
+    let mut snapshots = Vec::new();
+
+    for expr in &ast {
+        if let Expression::Proof { .. } = expr {
+            generator
+                .convert_proof(expr)
+                .expect("convert proof to R1CS");
+            snapshots.push((
+                generator.constraints.clone(),
+                generator.pub_inputs.clone(),
+                generator.witnesses.clone(),
+            ));
+        }
+    }
+
+    assert_eq!(snapshots.len(), 2, "expected two proofs in the program");
+    let (first_constraints, first_inputs, first_witnesses) = &snapshots[0];
+    let (second_constraints, second_inputs, second_witnesses) = &snapshots[1];
+
+    assert_eq!(
+        first_constraints.len(),
+        second_constraints.len(),
+        "constraints should reset between proofs"
+    );
+    assert_eq!(
+        first_inputs.len(),
+        second_inputs.len(),
+        "public inputs should reset between proofs"
+    );
+    assert_eq!(
+        first_witnesses.len(),
+        second_witnesses.len(),
+        "witness list should reset between proofs"
+    );
+}
+
+#[test]
+fn test_array_literal_unsupported_in_r1cs() {
+    let source = r#"
+    proof ArrayLiteralUnsupported {
+        input x: field;
+        output out: field;
+
+        {
+            [x, x];
+            out === x;
+        }
+    }
+    "#;
+
+    let lexer = Lexer::new(source);
+    let mut parser = Parser::new(lexer);
+    let ast = parser.parse_program().expect("parse program");
+
+    let mut type_checker = TypeChecker::new();
+    type_checker
+        .check_program(&ast)
+        .expect("type check program");
+
+    let mut generator = R1CSGenerator::new();
+
+    let proof = ast
+        .iter()
+        .find(|expr| matches!(expr, Expression::Proof { .. }))
+        .expect("expected proof in program");
+
+    let result = generator.convert_proof(proof);
+    assert!(
+        result.is_err(),
+        "R1CS generator should reject array literals"
+    );
+}
+
+#[test]
+fn test_dynamic_array_index_unsupported_in_r1cs() {
+    let source = r#"
+    proof DynamicIndex {
+        input arr: Array<field, 2>;
+        input idx: field;
+        let value = arr[idx] in
+        value
+    }
+    "#;
+
+    let lexer = Lexer::new(source);
+    let mut parser = Parser::new(lexer);
+    let ast = parser.parse_program().expect("parse program");
+
+    let mut type_checker = TypeChecker::new();
+    type_checker
+        .check_program(&ast)
+        .expect("type check program");
+
+    let mut generator = R1CSGenerator::new();
+
+    let proof = ast
+        .iter()
+        .find(|expr| matches!(expr, Expression::Proof { .. }))
+        .expect("expected proof in program");
+
+    let result = generator.convert_proof(proof);
+    assert!(
+        result.is_err(),
+        "R1CS generator should reject dynamic array indices"
+    );
+}

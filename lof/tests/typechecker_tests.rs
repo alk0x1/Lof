@@ -39,6 +39,13 @@ fn type_check_fails_with_nonzero_error(source: &str) -> bool {
     )
 }
 
+fn type_check_fails_with_type_mismatch(source: &str) -> bool {
+    matches!(
+        parse_and_type_check(source),
+        Err(TypeError::TypeMismatch { .. })
+    )
+}
+
 #[test]
 fn test_simple_variable_usage() {
     // Basic variable usage should pass
@@ -833,4 +840,55 @@ fn test_complex_expression_constrains_all_witnesses() {
     }
     "#;
     assert!(type_check_passes(source));
+}
+
+#[test]
+fn test_function_argument_type_mismatch_fails() {
+    let source = r#"
+    let double(x: field): field = x + x
+
+    proof TypeMismatch {
+        input flag: bool;
+        output out: field;
+        let result = double(flag) in
+        assert out === result;
+    }
+    "#;
+    assert!(type_check_fails_with_type_mismatch(source));
+}
+
+#[test]
+fn test_tuple_pattern_scope_does_not_leak() {
+    let source = r#"
+    proof TupleScope {
+        input x: field;
+        output out: field;
+        let result = (let (a, b) = (x, x) in b) in
+        assert out === result;
+        assert out === a;
+    }
+    "#;
+    assert!(type_check_fails_with_undefined_error(source));
+}
+
+#[test]
+fn test_proof_scope_isolated() {
+    let source = r#"
+    proof FirstProof {
+        input x: field;
+        witness secret: field;
+        output out: field;
+        assert out === secret;
+    }
+
+    proof SecondProof {
+        output out: field;
+        assert out === secret;
+    }
+    "#;
+    match parse_and_type_check(source) {
+        Err(TypeError::UndefinedVariable(_)) => {}
+        Err(other) => panic!("expected undefined variable error, got {:?}", other),
+        Ok(_) => panic!("expected type checker to fail"),
+    }
 }

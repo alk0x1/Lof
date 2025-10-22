@@ -79,6 +79,18 @@ impl R1CSGenerator {
         self.function_defs.insert(name, (params, body));
     }
 
+    fn reset_for_new_proof(&mut self) {
+        self.constraints.clear();
+        self.temp_var_counter = 0;
+        self.symbol_map.clear();
+        self.variable_substitutions.clear();
+        self.pub_inputs.clear();
+        self.witnesses.clear();
+        self.context.variables.clear();
+        self.arrays.clear();
+        self.boolean_vars.clear();
+    }
+
     pub fn write_r1cs_file(&self, source_path: &std::path::Path) -> std::io::Result<u64> {
         let mut r1cs_path = source_path
             .parent()
@@ -187,6 +199,8 @@ impl R1CSGenerator {
                 ..
             } => {
                 debug!("Converting proof '{}' to R1CS", name);
+
+                self.reset_for_new_proof();
 
                 // Process signals and add them to appropriate collections
                 for signal in signals {
@@ -367,12 +381,9 @@ impl R1CSGenerator {
                 arguments,
             } => self.convert_function_call(function, arguments),
 
-            Expression::ArrayLiteral(_elements) => {
-                // Array literals should be handled in let bindings
-                // If we reach here, it's an error - arrays can't be used as standalone expressions
-                warn!("Array literal used outside of let binding - not supported");
-                Ok(LinearCombination { terms: vec![] })
-            }
+            Expression::ArrayLiteral(_elements) => Err(R1CSError::UnsupportedOperation(
+                "Array literals are not supported in R1CS generation yet".to_string(),
+            )),
 
             Expression::ArrayIndex { array, index } => {
                 // Array indexing: arr[i]
@@ -391,21 +402,22 @@ impl R1CSGenerator {
                 let index_value = match index.as_ref() {
                     Expression::Number(n) => *n as usize,
                     _ => {
-                        warn!("Only constant array indices are supported (variable indexing is expensive)");
-                        return Ok(LinearCombination { terms: vec![] });
+                        return Err(R1CSError::UnsupportedOperation(
+                            "Only constant array indices are supported in R1CS generation"
+                                .to_string(),
+                        ))
                     }
                 };
 
                 // Look up array
                 if let Some(element_vars) = self.arrays.get(array_name) {
                     if index_value >= element_vars.len() {
-                        warn!(
+                        return Err(R1CSError::UnsupportedOperation(format!(
                             "Array index {} out of bounds for array {} (length {})",
                             index_value,
                             array_name,
                             element_vars.len()
-                        );
-                        return Ok(LinearCombination { terms: vec![] });
+                        )));
                     }
 
                     // Return the linear combination for the element variable
@@ -419,8 +431,10 @@ impl R1CSGenerator {
                         terms: vec![(elem_var.clone(), BigInt::from(1))],
                     })
                 } else {
-                    warn!("Array '{}' not found in array mapping", array_name);
-                    Ok(LinearCombination { terms: vec![] })
+                    Err(R1CSError::UnsupportedOperation(format!(
+                        "Array '{}' not found in array mapping",
+                        array_name
+                    )))
                 }
             }
 

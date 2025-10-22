@@ -8,6 +8,7 @@ BLUE := \033[0;34m
 GREEN := \033[0;32m
 YELLOW := \033[1;33m
 NC := \033[0m
+CARGO_HOME ?= $(HOME)/.cargo
 
 help: ## Show this help message
 	@echo -e "$(BLUE)Lof Language - Development Commands$(NC)"
@@ -44,6 +45,9 @@ install: build-release ## Install the Lof tooling locally
 	cargo install --force --path lofit
 	@echo -e "$(GREEN)Lofit installed successfully!$(NC)"
 	@lofit --version
+	@echo -e "$(BLUE)Installing lof-witness-gen utility...$(NC)"
+	cargo install --force --path lof-witness-gen
+	@echo -e "$(GREEN)lof-witness-gen installed successfully!$(NC)"
 
 clean: ## Clean build artifacts
 	@echo -e "$(BLUE)Cleaning build artifacts...$(NC)"
@@ -117,7 +121,7 @@ verify-all: build-release install ## Run full verification suite
 	@echo -e "$(BLUE)Running full verification suite...$(NC)"
 	python3 verification/verify.py --all
 
-verify: verify-add ## Run basic verification (default: add circuit)
+verify: verify-quick ## Run basic verification (default quick smoke test)
 
 verify-clean: ## Clean verification output files
 	@python3 verification/verify.py --clean
