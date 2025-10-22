@@ -104,10 +104,9 @@ impl WasmVerifier {
     pub fn new(verifying_key_bytes: &[u8]) -> Result<WasmVerifier, JsValue> {
         init_panic_hook();
 
-        let verifying_key = VerifyingKey::<Bn254>::deserialize_compressed(verifying_key_bytes)
-            .map_err(|e| {
-                JsValue::from_str(&format!("Failed to deserialize verifying key: {}", e))
-            })?;
+        let verifying_key = VerifyingKey::<Bn254>::deserialize_uncompressed(verifying_key_bytes)
+            .or_else(|_| VerifyingKey::<Bn254>::deserialize_compressed(verifying_key_bytes))
+            .map_err(|e| JsValue::from_str(&format!("Failed to deserialize verifying key: {}", e)))?;
 
         Ok(WasmVerifier { verifying_key })
     }
@@ -126,7 +125,10 @@ impl WasmVerifier {
         let proof = ark_groth16::Proof::<Bn254>::deserialize_compressed(proof_bytes)
             .map_err(|e| JsValue::from_str(&format!("Failed to deserialize proof: {}", e)))?;
 
-        let result = Groth16::<Bn254>::verify(&self.verifying_key, &public_values, &proof)
+        let mut full_inputs = vec![Fr::from(1u64)];
+        full_inputs.extend(public_values.iter().cloned());
+
+        let result = Groth16::<Bn254>::verify(&self.verifying_key, &full_inputs, &proof)
             .map_err(|e| JsValue::from_str(&format!("Verification failed: {}", e)))?;
 
         Ok(result)

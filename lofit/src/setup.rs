@@ -48,7 +48,7 @@ impl VerifierKey {
     #[instrument(skip(self, writer))]
     pub fn write<W: Write>(&self, mut writer: W) -> std::io::Result<()> {
         debug!("Writing verification key");
-        self.vk.serialize_uncompressed(&mut writer).map_err(|e| {
+        self.vk.serialize_compressed(&mut writer).map_err(|e| {
             error!("Error writing verification key: {:?}", e);
             std::io::Error::other(e)
         })
@@ -56,10 +56,20 @@ impl VerifierKey {
 
     #[instrument(skip(reader))]
     pub fn read<R: Read>(mut reader: R) -> std::io::Result<Self> {
-        let vk = ArkVerifyingKey::deserialize_uncompressed(&mut reader).map_err(|e| {
-            error!("Error reading verification key: {:?}", e);
-            std::io::Error::other(e)
-        })?;
-        Ok(Self { vk })
+        let mut buffer = Vec::new();
+        reader.read_to_end(&mut buffer)?;
+
+        let attempt_uncompressed =
+            ArkVerifyingKey::deserialize_uncompressed(&mut &buffer[..]).map_err(std::io::Error::other);
+        match attempt_uncompressed {
+            Ok(vk) => Ok(Self { vk }),
+            Err(_) => {
+                let vk = ArkVerifyingKey::deserialize_compressed(&mut &buffer[..]).map_err(|e| {
+                    error!("Error reading verification key: {:?}", e);
+                    std::io::Error::other(e)
+                })?;
+                Ok(Self { vk })
+            }
+        }
     }
 }
