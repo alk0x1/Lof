@@ -1,0 +1,7 @@
+// SHOULD_PASS - Boolean operations
+proof BooleanValid {
+    input a: field;
+    input b: field;
+    let comparison = a === b in
+    comparison
+}

@@ -1,0 +1,9 @@
+// SHOULD_PASS - Constants can be reused
+proof ConstantsReuse {
+    input x: field;
+    let y = x + 42 in
+    let z = y + 42 in
+    let w = z + 42 in
+    let _ = assert w === z + 42 in
+    w
+}

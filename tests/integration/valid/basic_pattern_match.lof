@@ -1,0 +1,7 @@
+// SHOULD_PASS - Basic pattern matching with literals
+proof BasicPatternMatch {
+    input x: field;
+    match x with
+    | 0 => 1
+    | _ => 2
+}

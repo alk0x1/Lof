@@ -1,0 +1,11 @@
+proof RefinedRange {
+    witness x: refined { field, x > 0 && x < 100 };
+    witness y: field;
+
+    {
+        // Manually assert the refinement predicate
+        assert x > 0 && x < 100;
+        // Use the refined value
+        y === x * 2
+    }
+}

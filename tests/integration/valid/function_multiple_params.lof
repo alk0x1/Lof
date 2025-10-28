@@ -1,0 +1,10 @@
+// SHOULD_PASS - Function with multiple parameters  
+let add(x: field)(y: field): field = x + y
+
+proof FunctionMultipleParams {
+    input a: field;
+    input b: field;
+    let result = add(a)(b) in
+    let _ = assert result === a + b in
+    result
+}

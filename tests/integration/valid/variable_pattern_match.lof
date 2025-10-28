@@ -1,0 +1,7 @@
+// SHOULD_PASS - Pattern matching with variable binding
+proof VariablePatternMatch {
+    input x: field;
+    match x with
+    | 0 => 1
+    | n => n * 2
+}

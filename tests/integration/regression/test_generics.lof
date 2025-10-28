@@ -1,0 +1,6 @@
+proof GenericTest<N> {
+    input values: array<field, N>;
+    witness sum: field;
+
+    assert sum === values[0]
+}

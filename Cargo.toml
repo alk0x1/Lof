@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "lof",
+    "lofit",
+    "lof-witness-gen"
+]
+resolver = "2"

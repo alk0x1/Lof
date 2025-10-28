@@ -1,0 +1,9 @@
+// SHOULD_PASS - Deep nesting without variable reuse
+proof DeepNestingValid {
+    input start: field;
+    let level1 = start + 1 in
+    let level2 = let temp = level1 + 2 in temp in
+    let level3 = let temp = level2 + 3 in temp in
+    let _ = assert level3 === level2 + 3 in
+    level3
+}

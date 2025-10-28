@@ -1,0 +1,8 @@
+// Test: Should pass because witness 'w' is constrained via assertion
+
+proof ConstrainedWitnessAssert {
+    input x: field;
+    witness w: field;
+
+    assert w > 0
+}

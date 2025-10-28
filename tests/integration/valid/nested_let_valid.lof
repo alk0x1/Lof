@@ -1,0 +1,9 @@
+// SHOULD_PASS - Valid nested let expressions
+proof NestedLetValid {
+    input x: field;
+    input y: field;
+    let sum = x + y in
+    let doubled = sum + sum in
+    let _ = assert doubled === sum + sum in
+    doubled
+}

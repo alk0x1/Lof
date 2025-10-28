@@ -1,0 +1,7 @@
+// SHOULD_PASS - Mix of linear and copyable
+proof MixedLinearity {
+    input x: field;
+    let with_constant = x + 42 in
+    let with_another_constant = with_constant * 2 in
+    with_another_constant
+}

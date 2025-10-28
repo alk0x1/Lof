@@ -1,0 +1,7 @@
+// SHOULD_FAIL - Variable used twice in same expression
+proof TupleInvalidSameExpression {
+    input a: field;
+    input b: field;
+    let result = (a, b) + (a, 1) in
+    result
+}

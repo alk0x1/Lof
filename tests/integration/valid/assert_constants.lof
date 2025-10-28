@@ -1,0 +1,6 @@
+// SHOULD_PASS - Assert with constants
+proof AssertConstants {
+    input x: field;
+    let _ = assert(42 == 42) in  // Changed === to ==
+    x
+}

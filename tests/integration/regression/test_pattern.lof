@@ -1,0 +1,10 @@
+proof PatternTest {
+    input x: field;
+    witness result: field;
+
+    let value = match x with
+        | Some(y) => y
+        | None() => 0
+    in
+    assert result === value
+}

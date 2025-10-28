@@ -1,0 +1,9 @@
+proof Transfer {
+    input balance: field;
+    input amount: field;
+
+    assert balance >= amount;
+
+    let new_balance = balance - amount in
+    new_balance
+}

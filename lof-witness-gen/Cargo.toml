@@ -1,0 +1,12 @@
+[package]
+name = "lof-witness-gen"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "lof-witness-gen"
+path = "src/main.rs"
+
+[dependencies]
+lof = { path = "../lof" }
+num-bigint = "0.4"

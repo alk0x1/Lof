@@ -1,0 +1,14 @@
+component Add {
+    input a: field;
+    input b: field;
+
+    a + b
+}
+
+proof UseAdd {
+    input x: field;
+    input y: field;
+    witness result: field;
+
+    result === Add(x)(y)
+}

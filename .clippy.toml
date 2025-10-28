@@ -1,0 +1,24 @@
+# Clippy configuration for Lof project
+# See: https://doc.rust-lang.org/clippy/configuration.html
+
+# Warn on missing documentation for public items
+# (can be strict for a compiler project)
+# We'll enable this progressively
+# missing-docs-in-public-items = true
+
+# Cognitive complexity threshold
+cognitive-complexity-threshold = 50
+
+# Maximum allowed function lines
+# ZK circuits can be complex, so we're lenient
+too-many-lines-threshold = 200
+
+# Type complexity limit
+type-complexity-threshold = 500
+
+# Maximum number of arguments for a function
+too-many-arguments-threshold = 8
+
+# Allow expect() and unwrap() to be used (we'll audit them separately)
+# In production, we might want to forbid these
+# disallowed-methods = ["expect", "unwrap"]

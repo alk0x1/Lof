@@ -1,0 +1,7 @@
+// SHOULD_PASS - Input declared but not used
+proof UnusedInput {
+    input unused: field;
+    let result = 42 + 24 in
+    let _ = assert result === 66 in
+    result
+}

@@ -1,0 +1,10 @@
+// SHOULD_PASS - Function with no parameters
+let get_constant: field = 42
+
+proof FunctionNoParams {
+    input x: field;
+    let constant = get_constant in  // Call still uses ()
+    let result = x + constant in
+    let _ = assert result === x + constant in
+    result
+}

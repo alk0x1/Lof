@@ -1,0 +1,29 @@
+# Rustfmt configuration for Lof project
+# Only stable features (no nightly required)
+# See: https://rust-lang.github.io/rustfmt/
+
+# Edition
+edition = "2021"
+
+# Formatting
+max_width = 100
+hard_tabs = false
+tab_spaces = 4
+
+# Use field init shorthand if possible
+use_field_init_shorthand = true
+
+# Use try shorthand
+use_try_shorthand = true
+
+# Reorder imports
+reorder_imports = true
+reorder_modules = true
+
+# Misc
+newline_style = "Unix"
+remove_nested_parens = true
+
+# Note: Many advanced formatting options require nightly Rust
+# To use them, add `unstable_features = true` and switch to nightly
+# For MVP, we keep only stable features for maximum compatibility

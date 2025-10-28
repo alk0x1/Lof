@@ -1,0 +1,9 @@
+// Test: Should fail because witness 'w' is never constrained
+// Addition and subtraction do NOT constrain variables
+
+proof UnconstrainedWitnessTest {
+    input x: field;
+    witness w: field;
+
+    let y = w + 5 in y
+}

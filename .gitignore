@@ -1,0 +1,91 @@
+# Rust build artifacts
+target
+**/*.rs.bk
+*.pdb
+node_modules
+
+# Cargo lock files (keep for applications, ignore for libraries)
+# We keep it since this is a compiler toolchain
+# Cargo.lock
+
+# Debug symbols
+*.dSYM/
+
+# IDEs and editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Lof compiler outputs
+*.r1cs
+*.bin
+*.wtns
+*_witness.json
+*_public.json
+full_witness.json
+
+# ZK proving system outputs
+keys/
+proofs/
+inputs/*.json
+!inputs/.gitkeep
+
+# WASM build artifacts
+*.wasm
+pkg/
+wasm-pack.log
+
+# Local cargo installs
+.cargo_local/
+
+# Verification framework
+verification/outputs/
+verification/node_modules/
+verification/package-lock.json
+verification/circuits/**/*.ir
+
+# Code coverage
+coverage/
+*.profraw
+*.profdata
+cobertura.xml
+tarpaulin-report.html
+lcov.info
+
+# Temporary files
+*.tmp
+*.temp
+.*.swp
+tree.txt
+settings.json
+
+# Development notes (use archive/ for these)
+# Keep in gitignore to avoid accidental commits of WIP notes
+*.local.md
+.scratch/
+
+# Logs
+*.log
+
+# OS specific
+Thumbs.db
+.AppleDouble
+.LSOverride
+
+.cleanup-helpers
+examples/
+syntax-highlighter
+syntaxes
+
+# Generated test artefacts
+tests/**/*.ir
+tests/integration/**/build/
+tests/integration/**/inputs/
+tests/integration/**/keys/
+tests/integration/**/proofs/
+
+ROADMAP.md
+verification

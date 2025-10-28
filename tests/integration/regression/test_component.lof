@@ -1,0 +1,16 @@
+component Square {
+    input x: field;
+    witness y: field;
+
+    {
+        assert y === x * x;
+        y
+    }
+}
+
+proof UseSquare {
+    input a: field;
+    witness result: field;
+
+    result === Square(a)
+}

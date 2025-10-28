@@ -1,0 +1,9 @@
+// SHOULD_PASS - Multiple inputs used once each
+proof MultipleInputsValid {
+    input a: field;
+    input b: field;
+    input c: field;
+    let result = a + b + c in
+    let _ = assert result === a + b + c in
+    result
+}
