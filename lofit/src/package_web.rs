@@ -7,11 +7,6 @@ use crate::{ConstraintSystem, LofCircuit, ProverKey};
 use ark_bn254::Fr;
 use tracing::{error, info, warn};
 
-const FALLBACK_LOFIT_JS: &str = include_str!("../pkg/lofit.js");
-const FALLBACK_LOFIT_D_TS: &str = include_str!("../pkg/lofit.d.ts");
-const FALLBACK_LOFIT_WASM_D_TS: &str = include_str!("../pkg/lofit_bg.wasm.d.ts");
-const FALLBACK_LOFIT_WASM: &[u8] = include_bytes!("../pkg/lofit_bg.wasm");
-
 pub fn package_for_web(
     r1cs_path: &Path,
     output_dir: Option<&Path>,
@@ -228,17 +223,36 @@ fn write_prover_skip_instructions(package_dir: &Path) -> Result<(), Box<dyn std:
     Ok(())
 }
 
+fn read_pkg_asset(name: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let asset_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("pkg")
+        .join(name);
+
+    fs::read(&asset_path).map_err(|err| {
+        let context = format!(
+            "Failed to read fallback prover asset '{}': {}. \
+Run `wasm-pack build --target web --out-dir pkg` inside the lofit crate to generate it.",
+            asset_path.display(),
+            err
+        );
+        std::io::Error::new(err.kind(), context).into()
+    })
+}
+
 fn copy_prebuilt_lofit_wasm(package_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let dest_dir = package_dir.join("prover");
     fs::create_dir_all(&dest_dir)?;
 
-    fs::write(dest_dir.join("lofit.js"), FALLBACK_LOFIT_JS)?;
-    fs::write(dest_dir.join("lofit.d.ts"), FALLBACK_LOFIT_D_TS)?;
+    fs::write(dest_dir.join("lofit.js"), read_pkg_asset("lofit.js")?)?;
+    fs::write(dest_dir.join("lofit.d.ts"), read_pkg_asset("lofit.d.ts")?)?;
     fs::write(
         dest_dir.join("lofit_bg.wasm.d.ts"),
-        FALLBACK_LOFIT_WASM_D_TS,
+        read_pkg_asset("lofit_bg.wasm.d.ts")?,
     )?;
-    fs::write(dest_dir.join("lofit_bg.wasm"), FALLBACK_LOFIT_WASM)?;
+    fs::write(
+        dest_dir.join("lofit_bg.wasm"),
+        read_pkg_asset("lofit_bg.wasm")?,
+    )?;
 
     Ok(())
 }
