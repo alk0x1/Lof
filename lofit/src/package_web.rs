@@ -224,9 +224,7 @@ fn write_prover_skip_instructions(package_dir: &Path) -> Result<(), Box<dyn std:
 }
 
 fn read_pkg_asset(name: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    let asset_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("pkg")
-        .join(name);
+    let asset_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("pkg").join(name);
 
     fs::read(&asset_path).map_err(|err| {
         let context = format!(
